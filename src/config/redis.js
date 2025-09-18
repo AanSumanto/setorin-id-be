@@ -33,15 +33,17 @@ class RedisConnection {
     }
 
     try {
+      // this.client = createClient({
+      //   socket: {
+      //     host: redisConfig.host,
+      //     port: redisConfig.port,
+      //   },
+      //   password: redisConfig.password,
+      //   database: redisConfig.db,
+      // });
       this.client = createClient({
-        socket: {
-          host: redisConfig.host,
-          port: redisConfig.port,
-        },
-        password: redisConfig.password,
-        database: redisConfig.db,
+        url: process.env.REDIS_URL_DEV,
       });
-
       // Event listeners
       this.setupEventListeners();
 
