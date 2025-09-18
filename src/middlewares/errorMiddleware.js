@@ -85,13 +85,21 @@ export const errorHandler = (err, req, res, next) => {
   error.statusCode = err.statusCode || 500;
 
   // Log error
+  // logger.error(`Error ${error.statusCode}: ${error.message}`, {
+  //   error: error,
+  //   stack: err.stack,
+  //   url: req.url,
+  //   method: req.method,
+  //   ip: req.ip,
+  //   userAgent: req.get("User-Agent"),
+  // });
+
   logger.error(`Error ${error.statusCode}: ${error.message}`, {
-    error: error,
-    stack: err.stack,
     url: req.url,
     method: req.method,
     ip: req.ip,
     userAgent: req.get("User-Agent"),
+    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
   });
 
   // MongoDB errors
