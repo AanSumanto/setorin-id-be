@@ -23,7 +23,6 @@ const createLogger = (service = "App") => {
       json()
     ),
     transports: [
-      // Console transport
       new winston.transports.Console({
         format: combine(
           colorize(),
@@ -32,34 +31,16 @@ const createLogger = (service = "App") => {
           consoleFormat
         ),
       }),
-
-      // File transport for errors
       new winston.transports.File({
         filename: path.join(logsDir, "error.log"),
         level: "error",
-        maxsize: 5242880, // 5MB
+        maxsize: 5242880,
         maxFiles: 5,
       }),
-
-      // File transport for all logs
       new winston.transports.File({
         filename: path.join(logsDir, "combined.log"),
-        maxsize: 5242880, // 5MB
+        maxsize: 5242880,
         maxFiles: 5,
-      }),
-    ],
-
-    // Handle uncaught exceptions
-    exceptionHandlers: [
-      new winston.transports.File({
-        filename: path.join(logsDir, "exceptions.log"),
-      }),
-    ],
-
-    // Handle unhandled promise rejections
-    rejectionHandlers: [
-      new winston.transports.File({
-        filename: path.join(logsDir, "rejections.log"),
       }),
     ],
   });

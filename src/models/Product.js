@@ -318,7 +318,7 @@ productSchema.index({ category: 1, status: 1 });
 productSchema.index({ owner: 1 });
 productSchema.index({ "location.coordinates": "2dsphere" }); // for geospatial queries
 productSchema.index({ status: 1, isAvailable: 1 });
-productSchema.index({ expiresAt: 1 }); // for TTL functionality
+// productSchema.index({ expiresAt: 1 }); // for TTL functionality
 productSchema.index({ createdAt: -1 });
 productSchema.index({ tags: 1 });
 

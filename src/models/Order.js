@@ -428,14 +428,14 @@ const orderSchema = new mongoose.Schema(
 );
 
 // Indexes for performance
-orderSchema.index({ orderNumber: 1 }, { unique: true });
+// orderSchema.index({ orderNumber: 1 }, { unique: true });
 orderSchema.index({ seller: 1, status: 1 });
 orderSchema.index({ buyer: 1, status: 1 });
 orderSchema.index({ assignedCollector: 1, status: 1 });
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ orderType: 1, status: 1 });
 orderSchema.index({ "pickupLocation.coordinates": "2dsphere" });
-orderSchema.index({ expiresAt: 1 }); // for TTL functionality
+// orderSchema.index({ expiresAt: 1 }); // for TTL functionality
 orderSchema.index({ scheduledPickupTime: 1 });
 
 // Virtual for distance calculation (will be populated by aggregation)

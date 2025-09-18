@@ -313,8 +313,8 @@ const userSchema = new mongoose.Schema(
 );
 
 // Indexes for performance
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ phone: 1 }, { unique: true });
+// userSchema.index({ email: 1 }, { unique: true });
+// userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1 });
 userSchema.index({ "addresses.coordinates": "2dsphere" }); // for geospatial queries
 userSchema.index({ isActive: 1, role: 1 });

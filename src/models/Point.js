@@ -430,7 +430,7 @@ const redemptionSchema = new mongoose.Schema(
 pointTransactionSchema.index({ user: 1, createdAt: -1 });
 pointTransactionSchema.index({ type: 1, status: 1 });
 pointTransactionSchema.index({ relatedOrder: 1 });
-pointTransactionSchema.index({ expiresAt: 1 }); // For TTL
+// pointTransactionSchema.index({ expiresAt: 1 }); // For TTL
 pointTransactionSchema.index({ source: 1, createdAt: -1 });
 
 // Indexes for Rewards
