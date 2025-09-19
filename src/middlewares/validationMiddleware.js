@@ -43,8 +43,17 @@ const addressSchema = Joi.object({
       "string.pattern.base": "Postal code must be 5 digits",
     }),
   coordinates: Joi.object({
-    latitude: Joi.number().required().min(-90).max(90),
-    longitude: Joi.number().required().min(-180).max(180),
+    type: Joi.string().valid("Point").default("Point"),
+    coordinates: Joi.array()
+      .length(2)
+      .items(
+        Joi.number().min(-180).max(180), // longitude
+        Joi.number().min(-90).max(90) // latitude
+      )
+      .required()
+      .messages({
+        "array.length": "Coordinates must be [longitude, latitude]",
+      }),
   }).required(),
   isDefault: Joi.boolean().default(false),
 });
@@ -247,8 +256,14 @@ const searchSchema = Joi.object({
 
 // Location validation
 const locationSchema = Joi.object({
-  latitude: Joi.number().required().min(-90).max(90),
-  longitude: Joi.number().required().min(-180).max(180),
+  type: Joi.string().valid("Point").default("Point"),
+  coordinates: Joi.array()
+    .length(2)
+    .items(
+      Joi.number().min(-180).max(180), // longitude
+      Joi.number().min(-90).max(90) // latitude
+    )
+    .required(),
 });
 
 // Coordinates with radius validation

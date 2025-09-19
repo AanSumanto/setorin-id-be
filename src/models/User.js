@@ -37,17 +37,27 @@ const addressSchema = new mongoose.Schema(
       trim: true,
     },
     coordinates: {
-      latitude: {
-        type: Number,
-        required: true,
-        min: -90,
-        max: 90,
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
       },
-      longitude: {
-        type: Number,
+      coordinates: {
+        type: [Number], // [longitude, latitude] - MongoDB GeoJSON format
         required: true,
-        min: -180,
-        max: 180,
+        validate: {
+          validator: function (coords) {
+            return (
+              coords.length === 2 &&
+              coords[0] >= -180 &&
+              coords[0] <= 180 && // longitude
+              coords[1] >= -90 &&
+              coords[1] <= 90
+            ); // latitude
+          },
+          message:
+            "Coordinates must be [longitude, latitude] within valid bounds",
+        },
       },
     },
     isDefault: {
@@ -437,12 +447,20 @@ userSchema.statics.findNearby = function (
   radiusInKm = 10,
   role = null
 ) {
+  // coordinates should be [longitude, latitude] for GeoJSON
+  const longitude = Array.isArray(coordinates)
+    ? coordinates[0]
+    : coordinates.longitude;
+  const latitude = Array.isArray(coordinates)
+    ? coordinates[1]
+    : coordinates.latitude;
+
   const query = {
     "addresses.coordinates": {
       $near: {
         $geometry: {
           type: "Point",
-          coordinates: [coordinates.longitude, coordinates.latitude],
+          coordinates: [longitude, latitude],
         },
         $maxDistance: radiusInKm * 1000, // Convert km to meters
       },
