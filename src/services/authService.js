@@ -27,10 +27,10 @@ class AuthService {
 
       if (existingUser) {
         if (existingUser.email === email) {
-          throw new AppError("Email already registered", 400);
+          throw new AppError("errors.email_already_registered", 400);
         }
         if (existingUser.phone === phone) {
-          throw new AppError("Phone number already registered", 400);
+          throw new AppError("errors.phone_already_registered", 400);
         }
       }
 
@@ -38,16 +38,15 @@ class AuthService {
       const passwordValidation =
         passwordManager.validatePasswordStrength(password);
       if (!passwordValidation.isValid) {
-        throw new AppError(
-          `Weak password: ${passwordValidation.feedback.join(", ")}`,
-          400
-        );
+        throw new AppError("errors.weak_password", 400, {
+          feedback: passwordValidation.feedback.join(", "),
+        });
       }
 
       // Check for breached password
       const breachCheck = await passwordManager.checkPasswordBreach(password);
       if (breachCheck.isBreached) {
-        throw new AppError(breachCheck.message, 400);
+        throw new AppError("errors.password_breached", 400);
       }
 
       // Generate email verification token
@@ -107,7 +106,7 @@ class AuthService {
       );
 
       if (!user) {
-        throw new AppError("Invalid email or password", 401);
+        throw new AppError("errors.invalid_credentials", 401);
       }
 
       // Check if account is locked
@@ -115,10 +114,7 @@ class AuthService {
         const remainingTime = Math.ceil(
           (user.lockUntil - Date.now()) / 1000 / 60
         );
-        throw new AppError(
-          `Account locked for ${remainingTime} minutes due to failed login attempts`,
-          423
-        );
+        throw new AppError("errors.account_locked", 423, { remainingTime });
       }
 
       // Verify password
@@ -130,21 +126,17 @@ class AuthService {
 
         const attemptsLeft = 5 - (user.loginAttempts + 1);
         if (attemptsLeft > 0) {
-          throw new AppError(
-            `Invalid email or password. ${attemptsLeft} attempts remaining`,
-            401
-          );
+          throw new AppError("errors.invalid_credentials", 401, {
+            attemptsLeft,
+          });
         } else {
-          throw new AppError(
-            "Account locked due to too many failed attempts",
-            423
-          );
+          throw new AppError("errors.account_locked", 423);
         }
       }
 
       // Check if user is active
       if (!user.isActive) {
-        throw new AppError("Account has been deactivated", 403);
+        throw new AppError("errors.account_deactivated", 403);
       }
 
       // Reset login attempts on successful login

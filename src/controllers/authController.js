@@ -22,7 +22,9 @@ class AuthController {
       // Basic validation
       if (!name || !email || !phone || !password) {
         return next(
-          new AppError("Name, email, phone, and password are required", 400)
+          new AppError("errors.required_field", 400, {
+            field: "name, email, phone, password",
+          })
         );
       }
 
@@ -43,7 +45,9 @@ class AuthController {
       if (role === "rt" || role === "rw") {
         if (!rtRwData) {
           return next(
-            new AppError("RT/RW data is required for this role", 400)
+            new AppError("errors.missing_required_data", 400, {
+              fields: "RT/RW data",
+            })
           );
         }
         userData.rtRwData = rtRwData;
@@ -52,7 +56,9 @@ class AuthController {
       if (role === "collector") {
         if (!collectorData) {
           return next(
-            new AppError("Collector data is required for this role", 400)
+            new AppError("errors.missing_required_data", 400, {
+              fields: "Collector data",
+            })
           );
         }
         userData.collectorData = collectorData;
@@ -74,11 +80,7 @@ class AuthController {
         deviceInfo
       );
 
-      res.status(201).json({
-        status: "success",
-        message: "Account created successfully",
-        data: result,
-      });
+      res.success("auth.registration_success", result, 201);
     } catch (error) {
       next(error);
     }
@@ -90,7 +92,11 @@ class AuthController {
       const { email, password, rememberMe } = req.body;
 
       if (!email || !password) {
-        return next(new AppError("Email and password are required", 400));
+        return next(
+          new AppError("errors.required_field", 400, {
+            field: "email, password",
+          })
+        );
       }
 
       const credentials = {
@@ -114,11 +120,7 @@ class AuthController {
         deviceInfo
       );
 
-      res.json({
-        status: "success",
-        message: "Login successful",
-        data: result,
-      });
+      res.success("auth.login_success", result);
     } catch (error) {
       // Log failed login attempt
       if (req.body.email) {
@@ -143,16 +145,14 @@ class AuthController {
       const { refreshToken } = req.body;
 
       if (!refreshToken) {
-        return next(new AppError("Refresh token is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "refresh token" })
+        );
       }
 
       const result = await authService.refreshToken(refreshToken);
 
-      res.json({
-        status: "success",
-        message: "Token refreshed successfully",
-        data: result,
-      });
+      res.success("auth.token_refreshed", result);
     } catch (error) {
       next(error);
     }
@@ -181,10 +181,7 @@ class AuthController {
         deviceInfo
       );
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.logout_success", result);
     } catch (error) {
       next(error);
     }
@@ -196,15 +193,16 @@ class AuthController {
       const { token } = req.params;
 
       if (!token) {
-        return next(new AppError("Verification token is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, {
+            field: "verification token",
+          })
+        );
       }
 
       const result = await authService.verifyEmail(token);
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.email_verified", result);
     } catch (error) {
       next(error);
     }
@@ -217,10 +215,7 @@ class AuthController {
 
       const result = await authService.resendEmailVerification(userId);
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.verification_email_sent", result);
     } catch (error) {
       next(error);
     }
@@ -232,7 +227,9 @@ class AuthController {
       const { email } = req.body;
 
       if (!email) {
-        return next(new AppError("Email is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "email" })
+        );
       }
 
       const result = await authService.forgotPassword(
@@ -251,10 +248,7 @@ class AuthController {
         deviceInfo
       );
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.password_reset_email_sent", result);
     } catch (error) {
       next(error);
     }
@@ -267,23 +261,19 @@ class AuthController {
 
       if (!token || !newPassword || !confirmPassword) {
         return next(
-          new AppError(
-            "Token, new password, and confirm password are required",
-            400
-          )
+          new AppError("errors.required_field", 400, {
+            field: "token, new password, confirm password",
+          })
         );
       }
 
       if (newPassword !== confirmPassword) {
-        return next(new AppError("Passwords do not match", 400));
+        return next(new AppError("errors.passwords_not_match", 400));
       }
 
       const result = await authService.resetPassword(token, newPassword);
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.password_reset", result);
     } catch (error) {
       next(error);
     }
@@ -297,15 +287,14 @@ class AuthController {
 
       if (!currentPassword || !newPassword || !confirmPassword) {
         return next(
-          new AppError(
-            "Current password, new password, and confirm password are required",
-            400
-          )
+          new AppError("errors.required_field", 400, {
+            field: "current password, new password, confirm password",
+          })
         );
       }
 
       if (newPassword !== confirmPassword) {
-        return next(new AppError("New passwords do not match", 400));
+        return next(new AppError("errors.passwords_not_match", 400));
       }
 
       const result = await authService.changePassword(
@@ -325,10 +314,7 @@ class AuthController {
         deviceInfo
       );
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.password_changed", result);
     } catch (error) {
       next(error);
     }
@@ -345,12 +331,7 @@ class AuthController {
       delete userProfile.emailVerificationToken;
       delete userProfile.passwordResetToken;
 
-      res.json({
-        status: "success",
-        data: {
-          user: userProfile,
-        },
-      });
+      res.success("auth.profile_retrieved", { user: userProfile });
     } catch (error) {
       next(error);
     }
@@ -363,23 +344,20 @@ class AuthController {
       const userId = req.user._id;
 
       if (!phoneNumber) {
-        return next(new AppError("Phone number is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "phone number" })
+        );
       }
 
       // Validate Indonesian phone number format
       const phoneRegex = /^(\+62|62|0)[0-9]{9,13}$/;
       if (!phoneRegex.test(phoneNumber)) {
-        return next(
-          new AppError("Invalid Indonesian phone number format", 400)
-        );
+        return next(new AppError("errors.invalid_phone", 400));
       }
 
       const result = await authService.generatePhoneOTP(userId, phoneNumber);
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.otp_sent", result);
     } catch (error) {
       next(error);
     }
@@ -392,7 +370,9 @@ class AuthController {
       const userId = req.user._id;
 
       if (!otp) {
-        return next(new AppError("OTP is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "OTP" })
+        );
       }
 
       const result = await authService.verifyPhoneOTP(userId, otp);
@@ -404,10 +384,7 @@ class AuthController {
       };
       await authService.logSecurityEvent(userId, "phone_verified", deviceInfo);
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.phone_verified", result);
     } catch (error) {
       next(error);
     }
@@ -419,15 +396,14 @@ class AuthController {
       const { password } = req.body;
 
       if (!password) {
-        return next(new AppError("Password is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "password" })
+        );
       }
 
       const result = await authService.checkPasswordRequirements(password);
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.password_strength_checked", result);
     } catch (error) {
       next(error);
     }
@@ -438,10 +414,35 @@ class AuthController {
     try {
       const policy = authService.getPasswordPolicy();
 
-      res.json({
-        status: "success",
-        data: policy,
-      });
+      // Transform policy to multilingual format
+      const multilingualPolicy = {
+        title: req.t("password_policy.title"),
+        requirements: {
+          title: req.t("password_policy.requirements"),
+          items: [
+            req.t("password_policy.min_length"),
+            req.t("password_policy.lowercase"),
+            req.t("password_policy.uppercase"),
+            req.t("password_policy.numbers"),
+            req.t("password_policy.symbols"),
+            req.t("password_policy.no_common_patterns"),
+            req.t("password_policy.not_breached"),
+          ],
+        },
+        recommendations: {
+          title: req.t("password_policy.recommendations_title"),
+          items: [
+            req.t("password_policy.unique_password"),
+            req.t("password_policy.password_manager"),
+            req.t("password_policy.two_factor"),
+            req.t("password_policy.regular_update"),
+          ],
+        },
+        minLength: policy.minLength,
+        maxLength: policy.maxLength,
+      };
+
+      res.success("auth.password_policy_retrieved", multilingualPolicy);
     } catch (error) {
       next(error);
     }
@@ -454,12 +455,7 @@ class AuthController {
 
       const sessions = await authService.getUserSessions(userId);
 
-      res.json({
-        status: "success",
-        data: {
-          sessions,
-        },
-      });
+      res.success("auth.sessions_retrieved", { sessions });
     } catch (error) {
       next(error);
     }
@@ -472,7 +468,9 @@ class AuthController {
       const userId = req.user._id;
 
       if (!tokenId) {
-        return next(new AppError("Token ID is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "token ID" })
+        );
       }
 
       const result = await authService.revokeSession(userId, tokenId);
@@ -487,10 +485,7 @@ class AuthController {
         tokenId,
       });
 
-      res.json({
-        status: "success",
-        data: result,
-      });
+      res.success("auth.session_revoked", result);
     } catch (error) {
       next(error);
     }
@@ -502,15 +497,14 @@ class AuthController {
       const { email } = req.query;
 
       if (!email) {
-        return next(new AppError("Email is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "email" })
+        );
       }
 
       const status = await authService.getAccountLockoutStatus(email);
 
-      res.json({
-        status: "success",
-        data: status,
-      });
+      res.success("auth.lockout_status_retrieved", status);
     } catch (error) {
       next(error);
     }
@@ -524,12 +518,7 @@ class AuthController {
 
       const events = await authService.getSecurityEvents(userId, limit);
 
-      res.json({
-        status: "success",
-        data: {
-          events,
-        },
-      });
+      res.success("auth.security_events_retrieved", { events });
     } catch (error) {
       next(error);
     }
@@ -543,12 +532,9 @@ class AuthController {
 
       const validation = await authService.validateSession(userId, token);
 
-      res.json({
-        status: "success",
-        data: {
-          valid: validation.valid,
-          user: validation.user,
-        },
+      res.success("auth.session_validated", {
+        valid: validation.valid,
+        user: validation.user,
       });
     } catch (error) {
       next(error);
@@ -561,18 +547,17 @@ class AuthController {
       const { email } = req.query;
 
       if (!email) {
-        return next(new AppError("Email is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "email" })
+        );
       }
 
       const { User } = await import("../models/index.js");
       const existingUser = await User.findOne({ email: email.toLowerCase() });
 
-      res.json({
-        status: "success",
-        data: {
-          available: !existingUser,
-          email: email.toLowerCase(),
-        },
+      res.success("auth.email_availability_checked", {
+        available: !existingUser,
+        email: email.toLowerCase(),
       });
     } catch (error) {
       next(error);
@@ -585,18 +570,17 @@ class AuthController {
       const { phone } = req.query;
 
       if (!phone) {
-        return next(new AppError("Phone number is required", 400));
+        return next(
+          new AppError("errors.required_field", 400, { field: "phone number" })
+        );
       }
 
       const { User } = await import("../models/index.js");
       const existingUser = await User.findOne({ phone });
 
-      res.json({
-        status: "success",
-        data: {
-          available: !existingUser,
-          phone,
-        },
+      res.success("auth.phone_availability_checked", {
+        available: !existingUser,
+        phone,
       });
     } catch (error) {
       next(error);

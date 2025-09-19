@@ -1,7 +1,7 @@
 import Joi from "joi";
 import { AppError } from "./errorMiddleware.js";
 
-// Helper function to validate request data
+// Helper function to validate request data with multilingual error messages
 const validateRequest = (schema) => {
   return (req, res, next) => {
     const { error, value } = schema.validate(req.body, {
@@ -10,15 +10,42 @@ const validateRequest = (schema) => {
     });
 
     if (error) {
-      const errorMessage = error.details
-        .map((detail) => detail.message)
-        .join(", ");
-      return next(new AppError(`Validation error: ${errorMessage}`, 400));
+      // Transform Joi errors to multilingual format
+      const validationErrors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        code: mapJoiErrorToKey(detail.type, detail.context),
+        interpolations: {
+          field: detail.path.join("."),
+          value: detail.context?.value,
+          limit: detail.context?.limit,
+        },
+      }));
+
+      return res.validationError(validationErrors);
     }
 
     req.body = value;
     next();
   };
+};
+
+// Map Joi error types to i18n keys
+const mapJoiErrorToKey = (joiType, context) => {
+  const errorMap = {
+    "any.required": "required_field",
+    "string.empty": "required_field",
+    "string.email": "invalid_email",
+    "string.pattern.base":
+      context?.name === "phone" ? "invalid_phone" : "validation_error",
+    "string.min": "field_too_short",
+    "string.max": "field_too_long",
+    "number.min": "number_too_small",
+    "number.max": "number_too_large",
+    "array.length": "invalid_array_length",
+    "any.only": "passwords_not_match",
+  };
+
+  return errorMap[joiType] || "validation_error";
 };
 
 // Indonesian phone number validation

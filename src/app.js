@@ -13,6 +13,11 @@ import { createLogger } from "./utils/logger.js";
 // Import middlewares
 import { errorHandler, notFound } from "./middlewares/errorMiddleware.js";
 import { requestLogger } from "./middlewares/loggerMiddleware.js";
+import {
+  multilingualResponse,
+  translationHelpers,
+  multilingualErrorHandler,
+} from "./middlewares/responseMiddleware.js";
 
 // Import routes
 import authRoutes from "./routes/authRoutes.js";
@@ -101,6 +106,10 @@ class App {
     }
     this.app.use(requestLogger);
 
+    // Multilingual response middleware
+    this.app.use(multilingualResponse);
+    this.app.use(translationHelpers);
+
     // Trust proxy (important for rate limiting behind reverse proxy)
     this.app.set("trust proxy", 1);
   }
@@ -150,7 +159,10 @@ class App {
     // 404 handler
     this.app.use(notFound);
 
-    // Global error handler
+    // Multilingual error handler
+    this.app.use(multilingualErrorHandler);
+
+    // Global error handler (fallback)
     this.app.use(errorHandler);
   }
 
