@@ -128,7 +128,7 @@ const collectorDataSchema = new mongoose.Schema(
     },
     vehicleType: {
       type: String,
-      enum: ["motorcycle", "car", "truck", "pickup"],
+      enum: ["cart", "bicycle", "motorcycle", "car", "truck", "pickup"],
       required: function () {
         return this.role === "collector";
       },
@@ -394,8 +394,12 @@ userSchema.methods.incrementLoginAttempts = function () {
   const updates = { $inc: { loginAttempts: 1 } };
 
   // Lock account after 5 failed attempts for 2 hours
+  // if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
+  //   updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 hours
+  // }
+
   if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
-    updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 hours
+    updates.$set = { lockUntil: Date.now() + 15 * 60 * 1000 }; // 15 minutes
   }
 
   return this.updateOne(updates);

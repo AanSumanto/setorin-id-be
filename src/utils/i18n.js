@@ -308,6 +308,139 @@ class InternationalizationManager {
           id: "Reward berhasil ditukar",
           en: "Reward redeemed successfully",
         },
+
+        // Product Business Logic
+        minimum_weight_not_met: {
+          id: "Berat minimum tidak terpenuhi. Minimal {required}kg, Anda input {provided}kg",
+          en: "Minimum weight not met. Required {required}kg, you provided {provided}kg",
+        },
+        minimum_volume_not_met: {
+          id: "Volume minimum tidak terpenuhi. Minimal {required}L, Anda input {provided}L",
+          en: "Minimum volume not met. Required {required}L, you provided {provided}L",
+        },
+        product_not_available: {
+          id: "Produk tidak tersedia",
+          en: "Product not available",
+        },
+        product_cannot_be_updated: {
+          id: "Produk dengan status {status} tidak dapat diperbarui",
+          en: "Product with status {status} cannot be updated",
+        },
+        product_cannot_be_deleted: {
+          id: "Produk dengan status {status} tidak dapat dihapus",
+          en: "Product with status {status} cannot be deleted",
+        },
+        cannot_favorite_own_product: {
+          id: "Tidak dapat menambahkan produk sendiri ke favorit",
+          en: "Cannot favorite your own product",
+        },
+
+        // Order Business Logic
+        cannot_order_own_product: {
+          id: "Tidak dapat memesan produk sendiri",
+          en: "Cannot order your own product",
+        },
+        order_cannot_be_accepted: {
+          id: "Pesanan dengan status {status} tidak dapat diterima",
+          en: "Order with status {status} cannot be accepted",
+        },
+        order_already_assigned: {
+          id: "Pesanan sudah ditugaskan ke pengepul lain",
+          en: "Order already assigned to another collector",
+        },
+        order_cannot_be_cancelled: {
+          id: "Pesanan dengan status {status} tidak dapat dibatalkan",
+          en: "Order with status {status} cannot be cancelled",
+        },
+        order_cannot_be_completed: {
+          id: "Pesanan dengan status {status} tidak dapat diselesaikan",
+          en: "Order with status {status} cannot be completed",
+        },
+        invalid_status_transition: {
+          id: "Transisi status tidak valid dari {from} ke {to}",
+          en: "Invalid status transition from {from} to {to}",
+        },
+        collector_not_available: {
+          id: "Pengepul tidak tersedia saat ini",
+          en: "Collector not available at this time",
+        },
+
+        // Cooking Oil Business Logic
+        only_individuals_can_sell_to_rt: {
+          id: "Hanya individu yang dapat menjual ke RT",
+          en: "Only individuals can sell to RT",
+        },
+        only_rt_can_sell_to_rw: {
+          id: "Hanya RT yang dapat menjual ke RW",
+          en: "Only RT can sell to RW",
+        },
+        only_rw_can_sell_to_platform: {
+          id: "Hanya RW yang dapat menjual ke Platform",
+          en: "Only RW can sell to Platform",
+        },
+        invalid_product_category: {
+          id: "Kategori produk tidak valid. Diharapkan {expected}",
+          en: "Invalid product category. Expected {expected}",
+        },
+        invalid_rt: {
+          id: "RT tidak valid",
+          en: "Invalid RT",
+        },
+        invalid_rw: {
+          id: "RW tidak valid",
+          en: "Invalid RW",
+        },
+        invalid_collector: {
+          id: "Pengepul tidak valid",
+          en: "Invalid collector",
+        },
+        insufficient_cooking_oil_balance: {
+          id: "Saldo minyak jelantah tidak mencukupi. Tersedia {available}L, diminta {requested}L",
+          en: "Insufficient cooking oil balance. Available {available}L, requested {requested}L",
+        },
+        invalid_order_type: {
+          id: "Tipe pesanan tidak valid",
+          en: "Invalid order type",
+        },
+        // Rating & Review Business Logic
+        can_only_rate_completed_orders: {
+          id: "Hanya dapat memberi rating untuk pesanan yang sudah selesai",
+          en: "Can only rate completed orders",
+        },
+        rating_already_exists: {
+          id: "Rating sudah pernah diberikan untuk pesanan ini",
+          en: "Rating already exists for this order",
+        },
+        rating_edit_deadline_passed: {
+          id: "Batas waktu edit rating sudah lewat (24 jam)",
+          en: "Rating edit deadline has passed (24 hours)",
+        },
+        cannot_vote_on_own_rating: {
+          id: "Tidak dapat vote rating sendiri",
+          en: "Cannot vote on your own rating",
+        },
+        rating_response_already_exists: {
+          id: "Respon untuk rating ini sudah ada",
+          en: "Response for this rating already exists",
+        },
+        cannot_report_own_rating: {
+          id: "Tidak dapat melaporkan rating sendiri",
+          en: "Cannot report your own rating",
+        },
+
+        // Additional error keys
+        rating_not_found: {
+          id: "Rating tidak ditemukan",
+          en: "Rating not found",
+        },
+        invalid_user_role: {
+          id: "Role user tidak valid. Diharapkan {expected}, aktual {actual}",
+          en: "Invalid user role. Expected {expected}, actual {actual}",
+        },
+        invalid_transaction_type: {
+          id: "Tipe transaksi tidak valid: {type}",
+          en: "Invalid transaction type: {type}",
+        },
       },
 
       // Field Labels (for forms)
