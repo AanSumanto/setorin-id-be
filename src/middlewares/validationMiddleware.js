@@ -115,6 +115,8 @@ const rtRwDataSchema = Joi.object({
     .min(5)
     .max(200),
   memberCount: Joi.number().integer().min(0).default(0),
+  cashBalance: Joi.number().min(0).default(0),
+  incentiveBalance: Joi.number().min(0).default(0),
 });
 
 // Collector data schema
@@ -131,7 +133,7 @@ const collectorDataSchema = Joi.object({
   businessLicense: Joi.string().trim().max(50).optional(),
   serviceRadius: Joi.number().min(1).max(50).default(10),
   vehicleType: Joi.string()
-    .valid("motorcycle", "car", "truck", "pickup")
+    .valid("cart", "bicycle", "motorcycle", "car", "truck", "pickup")
     .when("$role", {
       is: "collector",
       then: Joi.required(),
@@ -148,10 +150,10 @@ const collectorDataSchema = Joi.object({
   isAvailable: Joi.boolean().default(true),
 });
 
-// Registration validation
+// Registration validation (updated for email optional)
 const registrationSchema = Joi.object({
   name: Joi.string().required().trim().min(2).max(100),
-  email: Joi.string().required().email().lowercase().trim(),
+  email: Joi.string().email().lowercase().trim().optional(), // EMAIL NOW OPTIONAL
   phone: indonesianPhoneSchema.required(),
   password: Joi.string().required().min(8).max(128),
   role: Joi.string()
@@ -174,15 +176,88 @@ const registrationSchema = Joi.object({
   return value;
 });
 
-// Login validation
+// Login validation (updated for email optional - support email OR phone)
 const loginSchema = Joi.object({
-  email: Joi.string().required().email().lowercase().trim(),
+  email: Joi.string().email().lowercase().trim().optional(),
+  phone: indonesianPhoneSchema.optional(),
   password: Joi.string().required(),
+  selectedRole: Joi.string()
+    .valid("individual", "rt", "rw", "collector", "admin")
+    .optional(),
   rememberMe: Joi.boolean().default(false),
   platform: Joi.string().valid("mobile_app", "web_app").default("web_app"),
+}).custom((value, helpers) => {
+  // Must have either email or phone
+  if (!value.email && !value.phone) {
+    return helpers.error("any.required", {
+      message: "Either email or phone is required",
+    });
+  }
+  return value;
 });
 
-// Password reset validation
+// Role switching validation (NEW)
+const roleSwitchSchema = Joi.object({
+  roleName: Joi.string()
+    .valid("individual", "rt", "rw", "collector", "admin")
+    .required()
+    .messages({
+      "any.required": "Role name is required",
+      "any.only": "Invalid role name",
+    }),
+});
+
+// Add role validation (NEW)
+const addRoleSchema = Joi.object({
+  role: Joi.string()
+    .valid("individual", "rt", "rw", "collector", "admin")
+    .required()
+    .messages({
+      "any.required": "Role is required",
+      "any.only": "Invalid role",
+    }),
+
+  rtRwData: Joi.when("role", {
+    is: Joi.string().valid("rt", "rw"),
+    then: rtRwDataSchema.required(),
+    otherwise: Joi.forbidden(),
+  }),
+
+  collectorData: Joi.when("role", {
+    is: "collector",
+    then: collectorDataSchema.required(),
+    otherwise: Joi.forbidden(),
+  }),
+});
+
+// Forgot password validation (updated for email optional)
+const forgotPasswordSchema = Joi.object({
+  identifier: Joi.string().required().trim().messages({
+    "any.required": "Email or phone number is required",
+  }),
+});
+
+// Reset password with OTP validation (NEW for phone-only users)
+const resetPasswordOTPSchema = Joi.object({
+  phone: indonesianPhoneSchema.required(),
+  otp: Joi.string()
+    .required()
+    .length(6)
+    .pattern(/^\d{6}$/)
+    .messages({
+      "string.pattern.base": "OTP must be 6 digits",
+      "string.length": "OTP must be 6 digits",
+    }),
+  newPassword: Joi.string().required().min(8).max(128),
+  confirmPassword: Joi.string()
+    .required()
+    .valid(Joi.ref("newPassword"))
+    .messages({
+      "any.only": "Confirm password must match new password",
+    }),
+});
+
+// Password reset validation (existing)
 const passwordResetSchema = Joi.object({
   token: Joi.string().required().length(64), // SHA-256 hex length
   newPassword: Joi.string().required().min(8).max(128),
@@ -209,6 +284,26 @@ const passwordChangeSchema = Joi.object({
   if (value.currentPassword === value.newPassword) {
     return helpers.error("any.invalid", {
       message: "New password must be different from current password",
+    });
+  }
+  return value;
+});
+
+// Points transfer validation (NEW)
+const pointsTransferSchema = Joi.object({
+  fromRole: Joi.string()
+    .valid("individual", "rt", "rw", "collector", "admin")
+    .required(),
+  toRole: Joi.string()
+    .valid("individual", "rt", "rw", "collector", "admin")
+    .required(),
+  points: Joi.number().integer().min(1).required().messages({
+    "number.min": "Points must be at least 1",
+  }),
+}).custom((value, helpers) => {
+  if (value.fromRole === value.toRole) {
+    return helpers.error("any.invalid", {
+      message: "Cannot transfer points to the same role",
     });
   }
   return value;
@@ -241,9 +336,10 @@ const passwordStrengthSchema = Joi.object({
   password: Joi.string().required(),
 });
 
-// Profile update validation
+// Profile update validation (updated for email optional)
 const profileUpdateSchema = Joi.object({
   name: Joi.string().trim().min(2).max(100).optional(),
+  email: Joi.string().email().lowercase().trim().optional(), // Can be added/updated
   phone: indonesianPhoneSchema.optional(),
   dateOfBirth: Joi.date().max("now").optional(),
   gender: Joi.string().valid("male", "female", "other").optional(),
@@ -260,6 +356,13 @@ const profileUpdateSchema = Joi.object({
   }).optional(),
 });
 
+// Account lockout status validation (updated for email optional)
+const accountLockoutSchema = Joi.object({
+  identifier: Joi.string().required().trim().messages({
+    "any.required": "Email or phone number is required",
+  }),
+});
+
 // Query parameter validation for pagination
 const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
@@ -270,14 +373,18 @@ const paginationSchema = Joi.object({
   order: Joi.string().valid("asc", "desc").default("desc"),
 });
 
-// Search validation
+// Search validation (updated for multi-role)
 const searchSchema = Joi.object({
   q: Joi.string().trim().min(1).max(100).optional(),
   role: Joi.string()
     .valid("individual", "rt", "rw", "collector", "admin")
     .optional(),
+  roles: Joi.array()
+    .items(Joi.string().valid("individual", "rt", "rw", "collector", "admin"))
+    .optional(),
   isActive: Joi.boolean().optional(),
   isEmailVerified: Joi.boolean().optional(),
+  hasEmail: Joi.boolean().optional(), // NEW: filter users with/without email
   ...paginationSchema.describe().keys,
 });
 
@@ -351,6 +458,16 @@ const objectIdSchema = Joi.object({
     }),
 });
 
+// Role name parameter validation (NEW)
+const roleNameSchema = Joi.object({
+  roleName: Joi.string()
+    .required()
+    .valid("individual", "rt", "rw", "collector", "admin")
+    .messages({
+      "string.pattern.base": "Invalid role name",
+    }),
+});
+
 // Token validation
 const tokenSchema = Joi.object({
   token: Joi.string().required().min(10).max(200),
@@ -359,6 +476,11 @@ const tokenSchema = Joi.object({
 // Export validation middleware functions
 export const validateRegistration = validateRequest(registrationSchema);
 export const validateLogin = validateRequest(loginSchema);
+export const validateRoleSwitch = validateRequest(roleSwitchSchema); // NEW
+export const validateAddRole = validateRequest(addRoleSchema); // NEW
+export const validatePointsTransfer = validateRequest(pointsTransferSchema); // NEW
+export const validateForgotPassword = validateRequest(forgotPasswordSchema); // UPDATED
+export const validateResetPasswordOTP = validateRequest(resetPasswordOTPSchema); // NEW
 export const validatePasswordReset = validateRequest(passwordResetSchema);
 export const validatePasswordChange = validateRequest(passwordChangeSchema);
 export const validateEmail = validateRequest(emailSchema);
@@ -369,6 +491,7 @@ export const validateProfileUpdate = validateRequest(profileUpdateSchema);
 export const validateCoordinatesWithRadius = validateRequest(
   coordinatesWithRadiusSchema
 );
+export const validateAccountLockout = validateQuery(accountLockoutSchema); // UPDATED
 
 // Query validation
 export const validatePagination = validateQuery(paginationSchema);
@@ -376,6 +499,7 @@ export const validateSearch = validateQuery(searchSchema);
 
 // Parameter validation
 export const validateObjectId = validateParams(objectIdSchema);
+export const validateRoleName = validateParams(roleNameSchema); // NEW
 export const validateToken = validateParams(tokenSchema);
 
 // Custom validation helpers
@@ -411,6 +535,31 @@ export const validateMinimumAge = (dateOfBirth, minimumAge = 17) => {
   const age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
 
   return age >= minimumAge;
+};
+
+// Multi-role validation helpers (NEW)
+export const validateRolePermissions = (userRoles, requiredRoles) => {
+  const activeRoles = userRoles.filter((r) => r.isActive).map((r) => r.role);
+  return requiredRoles.some((role) => activeRoles.includes(role));
+};
+
+export const validateRoleData = (role, data) => {
+  const validation = {
+    rt: () => data.rtRwData && data.rtRwData.rtNumber && data.rtRwData.area,
+    rw: () =>
+      data.rtRwData &&
+      data.rtRwData.rtNumber &&
+      data.rtRwData.rwNumber &&
+      data.rtRwData.area,
+    collector: () =>
+      data.collectorData &&
+      data.collectorData.businessName &&
+      data.collectorData.vehicleType,
+    individual: () => true,
+    admin: () => true,
+  };
+
+  return validation[role] ? validation[role]() : false;
 };
 
 // File upload validation (for future use)
@@ -474,6 +623,11 @@ export const validateRateLimit = (
 export default {
   validateRegistration,
   validateLogin,
+  validateRoleSwitch,
+  validateAddRole,
+  validatePointsTransfer,
+  validateForgotPassword,
+  validateResetPasswordOTP,
   validatePasswordReset,
   validatePasswordChange,
   validateEmail,
@@ -485,7 +639,9 @@ export default {
   validatePagination,
   validateSearch,
   validateObjectId,
+  validateRoleName,
   validateToken,
   validateImageUpload,
   validateRateLimit,
+  validateAccountLockout,
 };

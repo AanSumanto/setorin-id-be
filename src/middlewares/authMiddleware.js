@@ -5,7 +5,7 @@ import { User } from "../models/index.js";
 
 const logger = createLogger("AuthMiddleware");
 
-// Authenticate user with JWT token
+// Authenticate user with JWT token (updated for multi-role)
 export const authenticate = async (req, res, next) => {
   try {
     // Extract token from Authorization header
@@ -25,7 +25,9 @@ export const authenticate = async (req, res, next) => {
     const decoded = jwtManager.verifyAccessToken(token);
 
     // Get user from database with fresh data
-    const user = await User.findById(decoded.id).select("+isActive");
+    const user = await User.findById(decoded.id || decoded.userId).select(
+      "+isActive"
+    );
 
     if (!user) {
       return next(new AppError("User not found", 401));
@@ -41,12 +43,23 @@ export const authenticate = async (req, res, next) => {
       return next(new AppError("Account is temporarily locked", 423));
     }
 
-    // Attach user to request
+    // Check if current role in token matches user's current role (multi-role validation)
+    if (decoded.currentRole && decoded.currentRole !== user.currentRole) {
+      return next(
+        new AppError("Role has been changed, please login again", 401)
+      );
+    }
+
+    // Attach user and role info to request
     req.user = user;
     req.token = token;
+    req.currentRole = user.currentRole;
+    req.currentRoleData = user.currentRoleData;
 
-    // Log successful authentication
-    logger.info(`User authenticated: ${user.email} (${user.role})`);
+    // Log successful authentication with current role
+    logger.info(
+      `User authenticated: ${user.email} (current role: ${user.currentRole})`
+    );
 
     next();
   } catch (error) {
@@ -62,7 +75,7 @@ export const authenticate = async (req, res, next) => {
   }
 };
 
-// Optional authentication (for public endpoints that can work with or without auth)
+// Optional authentication (updated for multi-role)
 export const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -70,61 +83,204 @@ export const optionalAuth = async (req, res, next) => {
 
     if (!token) {
       req.user = null;
+      req.currentRole = null;
+      req.currentRoleData = null;
       return next();
     }
 
     // Try to authenticate, but don't fail if it doesn't work
     try {
       const decoded = jwtManager.verifyAccessToken(token);
-      const user = await User.findById(decoded.id).select("+isActive");
+      const user = await User.findById(decoded.id || decoded.userId).select(
+        "+isActive"
+      );
 
       if (user && user.isActive && !user.isLocked) {
         req.user = user;
         req.token = token;
+        req.currentRole = user.currentRole;
+        req.currentRoleData = user.currentRoleData;
       } else {
         req.user = null;
+        req.currentRole = null;
+        req.currentRoleData = null;
       }
     } catch (authError) {
       req.user = null;
+      req.currentRole = null;
+      req.currentRoleData = null;
     }
 
     next();
   } catch (error) {
     logger.error("Optional authentication error:", error.message);
     req.user = null;
+    req.currentRole = null;
+    req.currentRoleData = null;
     next();
   }
 };
 
-// Role-based authorization
+// Role-based authorization (updated for current role)
 export const authorize = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
       return next(new AppError("Authentication required", 401));
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const userCurrentRole = req.currentRole;
+
+    if (!allowedRoles.includes(userCurrentRole)) {
       return next(
         new AppError("Insufficient permissions for this resource", 403)
       );
     }
 
     logger.info(
-      `Authorization granted: ${req.user.email} accessing ${req.method} ${req.path}`
+      `Authorization granted: ${req.user.email} (${userCurrentRole}) accessing ${req.method} ${req.path}`
     );
     next();
   };
 };
 
-// Check if user owns the resource or has admin privileges
+// Check if user has any of the specified roles (not necessarily current)
+export const hasAnyRole = (...requiredRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return next(new AppError("Authentication required", 401));
+    }
+
+    const userRoles = req.user.roles
+      .filter((r) => r.isActive)
+      .map((r) => r.role);
+
+    const hasRequiredRole = requiredRoles.some((role) =>
+      userRoles.includes(role)
+    );
+
+    if (!hasRequiredRole) {
+      return next(
+        new AppError("Insufficient permissions - missing required roles", 403)
+      );
+    }
+
+    logger.info(
+      `Multi-role authorization granted: ${
+        req.user.email
+      } has roles: ${userRoles.join(", ")}`
+    );
+    next();
+  };
+};
+
+// Check if user has all specified roles
+export const hasAllRoles = (...requiredRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return next(new AppError("Authentication required", 401));
+    }
+
+    const userRoles = req.user.roles
+      .filter((r) => r.isActive)
+      .map((r) => r.role);
+
+    const hasAllRequiredRoles = requiredRoles.every((role) =>
+      userRoles.includes(role)
+    );
+
+    if (!hasAllRequiredRoles) {
+      const missingRoles = requiredRoles.filter(
+        (role) => !userRoles.includes(role)
+      );
+      return next(
+        new AppError(`Missing required roles: ${missingRoles.join(", ")}`, 403)
+      );
+    }
+
+    next();
+  };
+};
+
+// Check if user is in specific area (for RT/RW roles)
+export const authorizeArea = () => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return next(new AppError("Authentication required", 401));
+    }
+
+    const currentRole = req.currentRole;
+    const currentRoleData = req.currentRoleData;
+
+    // Only applicable for RT/RW roles
+    if (!["rt", "rw"].includes(currentRole)) {
+      return next(
+        new AppError("Area authorization only applicable for RT/RW roles", 403)
+      );
+    }
+
+    if (!currentRoleData?.rtRwData?.area) {
+      return next(new AppError("RT/RW area data missing", 403));
+    }
+
+    // Attach area info to request for further processing
+    req.userArea = currentRoleData.rtRwData.area;
+    req.rtNumber = currentRoleData.rtRwData.rtNumber;
+    req.rwNumber = currentRoleData.rtRwData.rwNumber;
+
+    logger.info(
+      `Area authorization: ${req.user.email} (${currentRole}) - Area: ${req.userArea}, RT: ${req.rtNumber}`
+    );
+
+    next();
+  };
+};
+
+// Check if collector is available and within service area
+export const authorizeCollector = () => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return next(new AppError("Authentication required", 401));
+    }
+
+    const currentRole = req.currentRole;
+    const currentRoleData = req.currentRoleData;
+
+    if (currentRole !== "collector") {
+      return next(new AppError("Collector role required", 403));
+    }
+
+    if (!currentRoleData?.collectorData) {
+      return next(new AppError("Collector data missing", 403));
+    }
+
+    if (!currentRoleData.collectorData.isAvailable) {
+      return next(new AppError("Collector is not available", 403));
+    }
+
+    // Attach collector info to request
+    req.collectorData = currentRoleData.collectorData;
+
+    logger.info(
+      `Collector authorization: ${req.user.email} - Business: ${req.collectorData.businessName}`
+    );
+
+    next();
+  };
+};
+
+// Check ownership or admin privileges (updated for multi-role)
 export const authorizeOwnershipOrAdmin = (resourceUserField = "user") => {
   return async (req, res, next) => {
     if (!req.user) {
       return next(new AppError("Authentication required", 401));
     }
 
-    // Admins can access everything
-    if (req.user.role === "admin") {
+    // Check if user has admin role (not necessarily current role)
+    const hasAdminRole = req.user.roles.some(
+      (r) => r.role === "admin" && r.isActive
+    );
+
+    if (hasAdminRole) {
       return next();
     }
 
@@ -139,7 +295,6 @@ export const authorizeOwnershipOrAdmin = (resourceUserField = "user") => {
         }
 
         // For other resources, we need to check the resource's owner
-        // This will be handled in the specific route handlers
         req.checkOwnership = true;
         return next();
       }
@@ -170,13 +325,29 @@ export const requireEmailVerification = (req, res, next) => {
   next();
 };
 
-// Check account completion (for users who need to complete profile)
+// Check email verification requirement
+export const requirePhoneVerification = (req, res, next) => {
+  if (!req.user) {
+    return next(new AppError("Authentication required", 401));
+  }
+
+  if (!req.user.isPhoneVerified) {
+    return next(new AppError("Phone verification required", 403));
+  }
+
+  next();
+};
+
+// Check account completion (updated for multi-role)
 export const requireCompleteProfile = (req, res, next) => {
   if (!req.user) {
     return next(new AppError("Authentication required", 401));
   }
 
-  // Check if required fields are completed based on user role
+  const currentRole = req.currentRole;
+  const currentRoleData = req.currentRoleData;
+
+  // Check if required fields are completed based on current role
   const requiredFields = {
     individual: ["name", "phone", "addresses"],
     rt: ["name", "phone", "addresses", "rtRwData"],
@@ -185,7 +356,7 @@ export const requireCompleteProfile = (req, res, next) => {
     admin: ["name", "phone"],
   };
 
-  const required = requiredFields[req.user.role] || [];
+  const required = requiredFields[currentRole] || [];
   const missing = [];
 
   for (const field of required) {
@@ -193,11 +364,13 @@ export const requireCompleteProfile = (req, res, next) => {
       if (!req.user.addresses || req.user.addresses.length === 0) {
         missing.push("address");
       }
-    } else if (field.includes(".")) {
-      // Handle nested fields
-      const [parent, child] = field.split(".");
-      if (!req.user[parent] || !req.user[parent][child]) {
-        missing.push(field);
+    } else if (field === "rtRwData") {
+      if (!currentRoleData?.rtRwData) {
+        missing.push("RT/RW data");
+      }
+    } else if (field === "collectorData") {
+      if (!currentRoleData?.collectorData) {
+        missing.push("collector data");
       }
     } else if (!req.user[field]) {
       missing.push(field);
@@ -206,15 +379,29 @@ export const requireCompleteProfile = (req, res, next) => {
 
   if (missing.length > 0) {
     return next(
-      new AppError(`Profile incomplete. Missing: ${missing.join(", ")}`, 400)
+      new AppError(
+        `Profile incomplete for ${currentRole} role. Missing: ${missing.join(
+          ", "
+        )}`,
+        400
+      )
     );
   }
 
   next();
 };
 
-// Rate limiting per user
-export const userRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
+// Rate limiting per role (different limits based on role)
+export const roleBasedRateLimit = (limits = {}) => {
+  const defaultLimits = {
+    individual: 100,
+    rt: 200,
+    rw: 300,
+    collector: 500,
+    admin: 1000,
+  };
+
+  const roleLimits = { ...defaultLimits, ...limits };
   const requests = new Map(); // In production, use Redis
 
   return (req, res, next) => {
@@ -222,7 +409,10 @@ export const userRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
       return next();
     }
 
+    const userRole = req.currentRole;
     const userId = req.user._id.toString();
+    const limit = roleLimits[userRole] || defaultLimits.individual;
+    const windowMs = 15 * 60 * 1000; // 15 minutes
     const now = Date.now();
     const windowStart = now - windowMs;
 
@@ -238,8 +428,10 @@ export const userRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
 
     const userRequests = requests.get(userId);
 
-    if (userRequests.length >= maxRequests) {
-      return next(new AppError("Rate limit exceeded for this user", 429));
+    if (userRequests.length >= limit) {
+      return next(
+        new AppError(`Rate limit exceeded for ${userRole} role`, 429)
+      );
     }
 
     userRequests.push(now);
@@ -247,7 +439,7 @@ export const userRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
   };
 };
 
-// Check if user can access specific geographic location
+// Check if user can access specific geographic location (updated for collector service radius)
 export const authorizeLocation = (radiusKm = 50) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -255,7 +447,10 @@ export const authorizeLocation = (radiusKm = 50) => {
     }
 
     // Admins can access any location
-    if (req.user.role === "admin") {
+    const hasAdminRole = req.user.roles.some(
+      (r) => r.role === "admin" && r.isActive
+    );
+    if (hasAdminRole) {
       return next();
     }
 
@@ -277,18 +472,18 @@ export const authorizeLocation = (radiusKm = 50) => {
     // Calculate distance between user location and requested location
     const userCoords = req.user.defaultAddress.coordinates;
     const distance = calculateDistance(
-      userCoords.latitude,
-      userCoords.longitude,
+      userCoords.coordinates[1], // latitude
+      userCoords.coordinates[0], // longitude
       coordinates.latitude || coordinates[1],
       coordinates.longitude || coordinates[0]
     );
 
-    // For collectors, use their service radius
+    // For collectors, use their service radius from current role data
     if (
-      req.user.role === "collector" &&
-      req.user.collectorData?.serviceRadius
+      req.currentRole === "collector" &&
+      req.currentRoleData?.collectorData?.serviceRadius
     ) {
-      const allowedRadius = req.user.collectorData.serviceRadius;
+      const allowedRadius = req.currentRoleData.collectorData.serviceRadius;
       if (distance > allowedRadius) {
         return next(
           new AppError(
@@ -326,14 +521,18 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// Middleware to log user activity
+// Middleware to log user activity (updated with role info)
 export const logUserActivity = (action) => {
   return (req, res, next) => {
     if (req.user) {
       logger.info(
-        `User activity: ${req.user.email} (${req.user.role}) - ${action}`,
+        `User activity: ${req.user.email} (${req.currentRole}) - ${action}`,
         {
           userId: req.user._id,
+          currentRole: req.currentRole,
+          availableRoles: req.user.roles
+            .filter((r) => r.isActive)
+            .map((r) => r.role),
           action,
           ip: req.ip,
           userAgent: req.get("User-Agent"),
@@ -345,7 +544,7 @@ export const logUserActivity = (action) => {
   };
 };
 
-// Check if user has specific permissions (for fine-grained control)
+// Check if user has specific permissions (updated for multi-role)
 export const checkPermission = (permission) => {
   // Define role-based permissions
   const rolePermissions = {
@@ -378,6 +577,7 @@ export const checkPermission = (permission) => {
       "view_rt_members",
       "manage_rt_cash",
       "update_own_profile",
+      "distribute_incentives",
     ],
     rw: [
       "create_product",
@@ -395,6 +595,7 @@ export const checkPermission = (permission) => {
       "manage_rw_cash",
       "supervise_rt",
       "update_own_profile",
+      "distribute_incentives",
     ],
     collector: [
       "view_available_orders",
@@ -406,6 +607,7 @@ export const checkPermission = (permission) => {
       "manage_service_area",
       "view_earnings",
       "update_own_profile",
+      "update_availability",
     ],
     admin: [
       "manage_all_users",
@@ -418,6 +620,7 @@ export const checkPermission = (permission) => {
       "handle_disputes",
       "manage_locations",
       "system_maintenance",
+      "switch_user_roles",
     ],
   };
 
@@ -426,11 +629,21 @@ export const checkPermission = (permission) => {
       return next(new AppError("Authentication required", 401));
     }
 
-    const userPermissions = rolePermissions[req.user.role] || [];
+    const currentRole = req.currentRole;
+    const userPermissions = rolePermissions[currentRole] || [];
 
     if (!userPermissions.includes(permission)) {
-      return next(new AppError(`Permission denied: ${permission}`, 403));
+      return next(
+        new AppError(
+          `Permission denied: ${permission} (current role: ${currentRole})`,
+          403
+        )
+      );
     }
+
+    logger.info(
+      `Permission granted: ${req.user.email} (${currentRole}) - ${permission}`
+    );
 
     next();
   };
@@ -447,7 +660,10 @@ export const checkBusinessHours = (req, res, next) => {
 
   if (currentHour < businessStart || currentHour >= businessEnd) {
     // Allow admins to work outside business hours
-    if (req.user?.role === "admin") {
+    const hasAdminRole = req.user?.roles?.some(
+      (r) => r.role === "admin" && r.isActive
+    );
+    if (hasAdminRole) {
       return next();
     }
 
@@ -489,10 +705,15 @@ export default {
   authenticate,
   optionalAuth,
   authorize,
+  hasAnyRole,
+  hasAllRoles,
+  authorizeArea,
+  authorizeCollector,
   authorizeOwnershipOrAdmin,
   requireEmailVerification,
+  requirePhoneVerification,
   requireCompleteProfile,
-  userRateLimit,
+  roleBasedRateLimit,
   authorizeLocation,
   logUserActivity,
   checkPermission,

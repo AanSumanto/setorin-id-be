@@ -43,17 +43,17 @@ const addressSchema = new mongoose.Schema(
         default: "Point",
       },
       coordinates: {
-        type: [Number], // [longitude, latitude] - MongoDB GeoJSON format
+        type: [Number],
         required: true,
         validate: {
           validator: function (coords) {
             return (
               coords.length === 2 &&
               coords[0] >= -180 &&
-              coords[0] <= 180 && // longitude
+              coords[0] <= 180 &&
               coords[1] >= -90 &&
               coords[1] <= 90
-            ); // latitude
+            );
           },
           message:
             "Coordinates must be [longitude, latitude] within valid bounds",
@@ -73,9 +73,7 @@ const rtRwDataSchema = new mongoose.Schema(
   {
     rtNumber: {
       type: String,
-      required: function () {
-        return ["rt", "rw"].includes(this.role);
-      },
+      required: true,
     },
     rwNumber: {
       type: String,
@@ -85,9 +83,7 @@ const rtRwDataSchema = new mongoose.Schema(
     },
     area: {
       type: String,
-      required: function () {
-        return ["rt", "rw"].includes(this.role);
-      },
+      required: true,
     },
     memberCount: {
       type: Number,
@@ -112,9 +108,7 @@ const collectorDataSchema = new mongoose.Schema(
   {
     businessName: {
       type: String,
-      required: function () {
-        return this.role === "collector";
-      },
+      required: true,
     },
     businessLicense: {
       type: String,
@@ -122,16 +116,14 @@ const collectorDataSchema = new mongoose.Schema(
     },
     serviceRadius: {
       type: Number,
-      default: 10, // km
+      default: 10,
       min: 1,
       max: 50,
     },
     vehicleType: {
       type: String,
       enum: ["cart", "bicycle", "motorcycle", "car", "truck", "pickup"],
-      required: function () {
-        return this.role === "collector";
-      },
+      required: true,
     },
     operatingHours: {
       start: {
@@ -151,6 +143,67 @@ const collectorDataSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Role configuration schema
+const roleConfigSchema = new mongoose.Schema(
+  {
+    role: {
+      type: String,
+      enum: ["individual", "rt", "rw", "collector", "admin"],
+      required: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    isPrimary: {
+      type: Boolean,
+      default: false,
+    },
+    // Role-specific data
+    rtRwData: {
+      type: rtRwDataSchema,
+      required: function () {
+        return ["rt", "rw"].includes(this.role);
+      },
+    },
+    collectorData: {
+      type: collectorDataSchema,
+      required: function () {
+        return this.role === "collector";
+      },
+    },
+    // Points per role
+    points: {
+      current: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      lifetime: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      lastEarned: Date,
+    },
+    // Rating per role
+    rating: {
+      average: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 5,
+      },
+      count: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     // Basic Information
@@ -163,8 +216,8 @@ const userSchema = new mongoose.Schema(
     },
     email: {
       type: String,
-      required: [true, "Email is required"],
       unique: true,
+      sparse: true, // Allow null/undefined values to be unique
       lowercase: true,
       trim: true,
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Please provide a valid email"],
@@ -182,24 +235,42 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "Password is required"],
       minlength: [8, "Password must be at least 8 characters"],
-      select: false, // Don't include in queries by default
+      select: false,
     },
 
-    // User Role
-    role: {
-      type: String,
-      enum: {
-        values: ["individual", "rt", "rw", "collector", "admin"],
-        message: "Role must be one of: individual, rt, rw, collector, admin",
+    // Multiple Roles Configuration
+    roles: {
+      type: [roleConfigSchema],
+      required: true,
+      validate: {
+        validator: function (roles) {
+          // At least one role must exist
+          if (roles.length === 0) return false;
+
+          // Only one primary role allowed
+          const primaryRoles = roles.filter((r) => r.isPrimary);
+          if (primaryRoles.length !== 1) return false;
+
+          // No duplicate roles
+          const roleNames = roles.map((r) => r.role);
+          return roleNames.length === new Set(roleNames).size;
+        },
+        message:
+          "Must have at least one role, exactly one primary role, and no duplicates",
       },
-      required: [true, "Role is required"],
-      default: "individual",
+    },
+
+    // Current active role (for session management)
+    currentRole: {
+      type: String,
+      enum: ["individual", "rt", "rw", "collector", "admin"],
+      required: true,
     },
 
     // Profile Information
     avatar: {
       url: String,
-      publicId: String, // for DO Spaces file management
+      publicId: String,
     },
     dateOfBirth: {
       type: Date,
@@ -218,50 +289,6 @@ const userSchema = new mongoose.Schema(
 
     // Address Information
     addresses: [addressSchema],
-
-    // Role-specific Data
-    rtRwData: {
-      type: rtRwDataSchema,
-      required: function () {
-        return ["rt", "rw"].includes(this.role);
-      },
-    },
-    collectorData: {
-      type: collectorDataSchema,
-      required: function () {
-        return this.role === "collector";
-      },
-    },
-
-    // Points and Rewards System
-    points: {
-      current: {
-        type: Number,
-        default: 0,
-        min: 0,
-      },
-      lifetime: {
-        type: Number,
-        default: 0,
-        min: 0,
-      },
-      lastEarned: Date,
-    },
-
-    // Rating System
-    rating: {
-      average: {
-        type: Number,
-        default: 0,
-        min: 0,
-        max: 5,
-      },
-      count: {
-        type: Number,
-        default: 0,
-        min: 0,
-      },
-    },
 
     // Account Status
     isActive: {
@@ -292,7 +319,7 @@ const userSchema = new mongoose.Schema(
     passwordResetExpires: Date,
 
     // Metadata
-    fcmToken: String, // for push notifications
+    fcmToken: String,
     preferences: {
       notifications: {
         email: {
@@ -322,20 +349,31 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Indexes for performance
-// userSchema.index({ email: 1 }, { unique: true });
-// userSchema.index({ phone: 1 }, { unique: true });
-userSchema.index({ role: 1 });
-userSchema.index({ "addresses.coordinates": "2dsphere" }); // for geospatial queries
-userSchema.index({ isActive: 1, role: 1 });
-userSchema.index({ "rating.average": -1, role: 1 }); // for finding top-rated collectors
+// Indexes
+userSchema.index({ email: 1 }, { unique: true, sparse: true }); // sparse allows multiple null values
+userSchema.index({ phone: 1 }); // Tidak unique lagi untuk multi-role
+userSchema.index({ "roles.role": 1 });
+userSchema.index({ currentRole: 1 });
+userSchema.index({ "addresses.coordinates": "2dsphere" });
+userSchema.index({ isActive: 1, "roles.role": 1 });
+userSchema.index({ "roles.rating.average": -1, "roles.role": 1 }); // for top-rated by role
+
+// Virtual for getting primary role
+userSchema.virtual("primaryRole").get(function () {
+  return this.roles.find((role) => role.isPrimary);
+});
+
+// Virtual for getting current role data
+userSchema.virtual("currentRoleData").get(function () {
+  return this.roles.find((role) => role.role === this.currentRole);
+});
 
 // Virtual for account lock status
 userSchema.virtual("isLocked").get(function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 });
 
-// Virtual for full address
+// Virtual for default address
 userSchema.virtual("defaultAddress").get(function () {
   return this.addresses.find((addr) => addr.isDefault) || this.addresses[0];
 });
@@ -348,13 +386,21 @@ userSchema.pre("save", async function (next) {
       this.password = await bcrypt.hash(this.password, 12);
     }
 
+    // Ensure currentRole exists in roles array
+    if (
+      this.currentRole &&
+      !this.roles.some((r) => r.role === this.currentRole)
+    ) {
+      this.currentRole =
+        this.roles.find((r) => r.isPrimary)?.role || this.roles[0]?.role;
+    }
+
     // Ensure only one default address
     if (this.addresses.length > 0) {
       const defaultAddresses = this.addresses.filter((addr) => addr.isDefault);
       if (defaultAddresses.length === 0) {
         this.addresses[0].isDefault = true;
       } else if (defaultAddresses.length > 1) {
-        // Keep only the first default, set others to false
         let firstDefault = true;
         this.addresses.forEach((addr) => {
           if (addr.isDefault && firstDefault) {
@@ -382,6 +428,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   }
 };
 
+// Login attempt management
 userSchema.methods.incrementLoginAttempts = function () {
   // If we have a previous lock that has expired, restart at 1
   if (this.lockUntil && this.lockUntil < Date.now()) {
@@ -393,11 +440,7 @@ userSchema.methods.incrementLoginAttempts = function () {
 
   const updates = { $inc: { loginAttempts: 1 } };
 
-  // Lock account after 5 failed attempts for 2 hours
-  // if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
-  //   updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 hours
-  // }
-
+  // Lock account after 5 failed attempts for 15 minutes
   if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
     updates.$set = { lockUntil: Date.now() + 15 * 60 * 1000 }; // 15 minutes
   }
@@ -411,34 +454,159 @@ userSchema.methods.resetLoginAttempts = function () {
   });
 };
 
-userSchema.methods.addPoints = function (points, reason = "Transaction") {
-  this.points.current += points;
-  this.points.lifetime += points;
-  this.points.lastEarned = new Date();
+// Role management methods
+userSchema.methods.switchRole = function (roleName) {
+  const role = this.roles.find((r) => r.role === roleName && r.isActive);
+  if (!role) {
+    throw new Error(`Role ${roleName} not found or inactive`);
+  }
 
-  logger.info(`Points added to user ${this._id}: +${points} (${reason})`);
+  this.currentRole = roleName;
   return this.save();
 };
 
-userSchema.methods.deductPoints = function (points) {
-  if (this.points.current < points) {
+userSchema.methods.addRole = function (roleData) {
+  // Check if role already exists
+  if (this.roles.some((r) => r.role === roleData.role)) {
+    throw new Error(`Role ${roleData.role} already exists`);
+  }
+
+  // If this is the first role, make it primary
+  if (this.roles.length === 0) {
+    roleData.isPrimary = true;
+    this.currentRole = roleData.role;
+  }
+
+  this.roles.push(roleData);
+  return this.save();
+};
+
+userSchema.methods.removeRole = function (roleName) {
+  const roleIndex = this.roles.findIndex((r) => r.role === roleName);
+  if (roleIndex === -1) {
+    throw new Error(`Role ${roleName} not found`);
+  }
+
+  const roleToRemove = this.roles[roleIndex];
+
+  // Cannot remove primary role if other roles exist
+  if (roleToRemove.isPrimary && this.roles.length > 1) {
+    throw new Error(
+      "Cannot remove primary role. Set another role as primary first."
+    );
+  }
+
+  this.roles.splice(roleIndex, 1);
+
+  // If removing current role, switch to primary
+  if (this.currentRole === roleName) {
+    this.currentRole =
+      this.roles.find((r) => r.isPrimary)?.role || this.roles[0]?.role;
+  }
+
+  return this.save();
+};
+
+// Set primary role
+userSchema.methods.setPrimaryRole = function (roleName) {
+  const role = this.roles.find((r) => r.role === roleName && r.isActive);
+  if (!role) {
+    throw new Error(`Role ${roleName} not found or inactive`);
+  }
+
+  // Remove primary flag from all roles
+  this.roles.forEach((r) => {
+    r.isPrimary = false;
+  });
+
+  // Set new primary role
+  role.isPrimary = true;
+
+  return this.save();
+};
+
+// Points management per role
+userSchema.methods.addPointsToRole = function (
+  points,
+  roleName = null,
+  reason = "Transaction"
+) {
+  const targetRole = roleName || this.currentRole;
+  const role = this.roles.find((r) => r.role === targetRole);
+
+  if (!role) {
+    throw new Error(`Role ${targetRole} not found`);
+  }
+
+  role.points.current += points;
+  role.points.lifetime += points;
+  role.points.lastEarned = new Date();
+
+  logger.info(
+    `Points added to user ${this._id} role ${targetRole}: +${points} (${reason})`
+  );
+  return this.save();
+};
+
+userSchema.methods.deductPointsFromRole = function (points, roleName = null) {
+  const targetRole = roleName || this.currentRole;
+  const role = this.roles.find((r) => r.role === targetRole);
+
+  if (!role) {
+    throw new Error(`Role ${targetRole} not found`);
+  }
+
+  if (role.points.current < points) {
     throw new Error("Insufficient points");
   }
 
-  this.points.current -= points;
-  logger.info(`Points deducted from user ${this._id}: -${points}`);
+  role.points.current -= points;
+  logger.info(
+    `Points deducted from user ${this._id} role ${targetRole}: -${points}`
+  );
   return this.save();
 };
 
-userSchema.methods.updateRating = function (newRating) {
-  const totalRating = this.rating.average * this.rating.count + newRating;
-  this.rating.count += 1;
-  this.rating.average = totalRating / this.rating.count;
+// Rating management per role
+userSchema.methods.updateRoleRating = function (newRating, roleName = null) {
+  const targetRole = roleName || this.currentRole;
+  const role = this.roles.find((r) => r.role === targetRole);
+
+  if (!role) {
+    throw new Error(`Role ${targetRole} not found`);
+  }
+
+  const totalRating = role.rating.average * role.rating.count + newRating;
+  role.rating.count += 1;
+  role.rating.average = totalRating / role.rating.count;
 
   logger.info(
-    `Rating updated for user ${this._id}: ${this.rating.average} (${this.rating.count} reviews)`
+    `Rating updated for user ${this._id} role ${targetRole}: ${role.rating.average} (${role.rating.count} reviews)`
   );
   return this.save();
+};
+
+// Check if user has specific role
+userSchema.methods.hasRole = function (roleName) {
+  return this.roles.some((r) => r.role === roleName && r.isActive);
+};
+
+// Get role data
+userSchema.methods.getRoleData = function (roleName) {
+  return this.roles.find((r) => r.role === roleName);
+};
+
+// Legacy methods for backward compatibility
+userSchema.methods.addPoints = function (points, reason = "Transaction") {
+  return this.addPointsToRole(points, null, reason);
+};
+
+userSchema.methods.deductPoints = function (points) {
+  return this.deductPointsFromRole(points, null);
+};
+
+userSchema.methods.updateRating = function (newRating) {
+  return this.updateRoleRating(newRating, null);
 };
 
 // Static methods
@@ -446,12 +614,23 @@ userSchema.statics.findByEmail = function (email) {
   return this.findOne({ email: email.toLowerCase() });
 };
 
-userSchema.statics.findNearby = function (
+userSchema.statics.findByPhone = function (phone) {
+  return this.find({ phone: phone });
+};
+
+userSchema.statics.findByRole = function (role) {
+  return this.find({
+    "roles.role": role,
+    "roles.isActive": true,
+    isActive: true,
+  });
+};
+
+userSchema.statics.findNearbyByRole = function (
   coordinates,
-  radiusInKm = 10,
-  role = null
+  role,
+  radiusInKm = 10
 ) {
-  // coordinates should be [longitude, latitude] for GeoJSON
   const longitude = Array.isArray(coordinates)
     ? coordinates[0]
     : coordinates.longitude;
@@ -459,68 +638,163 @@ userSchema.statics.findNearby = function (
     ? coordinates[1]
     : coordinates.latitude;
 
-  const query = {
+  return this.find({
     "addresses.coordinates": {
       $near: {
         $geometry: {
           type: "Point",
           coordinates: [longitude, latitude],
         },
-        $maxDistance: radiusInKm * 1000, // Convert km to meters
+        $maxDistance: radiusInKm * 1000,
+      },
+    },
+    "roles.role": role,
+    "roles.isActive": true,
+    isActive: true,
+  });
+};
+
+userSchema.statics.findTopRatedByRole = function (role, limit = 10) {
+  return this.aggregate([
+    {
+      $match: {
+        isActive: true,
+        "roles.role": role,
+        "roles.isActive": true,
+      },
+    },
+    {
+      $addFields: {
+        roleData: {
+          $filter: {
+            input: "$roles",
+            cond: { $eq: ["$$this.role", role] },
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        roleRating: { $arrayElemAt: ["$roleData.rating", 0] },
+      },
+    },
+    {
+      $match: {
+        "roleRating.count": { $gte: 1 },
+      },
+    },
+    {
+      $sort: {
+        "roleRating.average": -1,
+        "roleRating.count": -1,
+      },
+    },
+    {
+      $limit: limit,
+    },
+  ]);
+};
+
+// Legacy method for backward compatibility
+userSchema.statics.findNearby = function (
+  coordinates,
+  radiusInKm = 10,
+  role = null
+) {
+  if (role) {
+    return this.findNearbyByRole(coordinates, role, radiusInKm);
+  }
+
+  const longitude = Array.isArray(coordinates)
+    ? coordinates[0]
+    : coordinates.longitude;
+  const latitude = Array.isArray(coordinates)
+    ? coordinates[1]
+    : coordinates.latitude;
+
+  return this.find({
+    "addresses.coordinates": {
+      $near: {
+        $geometry: {
+          type: "Point",
+          coordinates: [longitude, latitude],
+        },
+        $maxDistance: radiusInKm * 1000,
       },
     },
     isActive: true,
-  };
-
-  if (role) {
-    query.role = role;
-  }
-
-  return this.find(query);
+  });
 };
 
-userSchema.statics.findTopRatedCollectors = function (limit = 10) {
-  return this.find({
-    role: "collector",
-    isActive: true,
-    "rating.count": { $gte: 1 },
-  })
-    .sort({ "rating.average": -1, "rating.count": -1 })
-    .limit(limit);
-};
-
-userSchema.statics.updateUserRating = async function (userId) {
+// Update rating for specific role using external Rating model
+userSchema.statics.updateUserRating = async function (userId, role = null) {
   try {
     const Rating = mongoose.model("Rating");
 
-    // Calculate new rating from all active ratings
-    const ratingStats = await Rating.aggregate([
-      {
-        $match: {
-          ratee: mongoose.Types.ObjectId(userId),
-          status: "active",
+    // If role specified, update that role's rating
+    if (role) {
+      const ratingStats = await Rating.aggregate([
+        {
+          $match: {
+            ratee: new mongoose.Types.ObjectId(userId),
+            rateeRole: role,
+            status: "active",
+          },
         },
-      },
-      {
-        $group: {
-          _id: null,
-          averageRating: { $avg: "$rating" },
-          ratingCount: { $sum: 1 },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: "$rating" },
+            ratingCount: { $sum: 1 },
+          },
         },
-      },
-    ]);
+      ]);
 
-    const stats = ratingStats[0] || { averageRating: 0, ratingCount: 0 };
+      const stats = ratingStats[0] || { averageRating: 0, ratingCount: 0 };
 
-    // Update user rating
-    await this.findByIdAndUpdate(userId, {
-      "rating.average": Math.round(stats.averageRating * 10) / 10, // Round to 1 decimal
-      "rating.count": stats.ratingCount,
-    });
+      await this.findOneAndUpdate(
+        { _id: userId, "roles.role": role },
+        {
+          $set: {
+            "roles.$.rating.average": Math.round(stats.averageRating * 10) / 10,
+            "roles.$.rating.count": stats.ratingCount,
+          },
+        }
+      );
 
-    logger.info(
-      `Updated rating for user ${userId}: ${stats.averageRating} (${stats.ratingCount} reviews)`
-    );
+      logger.info(
+        `Updated rating for user ${userId} role ${role}: ${stats.averageRating} (${stats.ratingCount} reviews)`
+      );
+    } else {
+      // Update all role ratings
+      const user = await this.findById(userId);
+      if (!user) return;
+
+      for (const userRole of user.roles) {
+        const ratingStats = await Rating.aggregate([
+          {
+            $match: {
+              ratee: new mongoose.Types.ObjectId(userId),
+              rateeRole: userRole.role,
+              status: "active",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              averageRating: { $avg: "$rating" },
+              ratingCount: { $sum: 1 },
+            },
+          },
+        ]);
+
+        const stats = ratingStats[0] || { averageRating: 0, ratingCount: 0 };
+        userRole.rating.average = Math.round(stats.averageRating * 10) / 10;
+        userRole.rating.count = stats.ratingCount;
+      }
+
+      await user.save();
+    }
   } catch (error) {
     logger.error("Error updating user rating:", error);
   }
