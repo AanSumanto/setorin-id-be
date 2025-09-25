@@ -28,30 +28,48 @@ class AuthController {
         );
       }
 
-      // Handle existing user check based on available identifiers
       const { User } = await import("../models/index.js");
-      let existingUser = null;
 
-      if (email) {
-        existingUser = await User.findByEmail(email.toLowerCase().trim());
-        if (existingUser) {
-          // Same person wants to add a new role
-          return this.addRoleToExistingUser(req, res, next, existingUser);
+      // =======================================
+      // STEP 1: Check phone number usage first
+      // =======================================
+      const phoneUser = await User.findOne({ phone: phone.trim() });
+      if (phoneUser) {
+        // Phone already exists, check if it's the same person
+        if (
+          email &&
+          phoneUser.email &&
+          phoneUser.email.toLowerCase() === email.toLowerCase().trim()
+        ) {
+          // Same person (same phone + same email) - add role
+          return this.addRoleToExistingUser(req, res, next, phoneUser);
+        } else if (!email && !phoneUser.email) {
+          // Both registrations without email, same phone - this is the same person
+          return this.addRoleToExistingUser(req, res, next, phoneUser);
+        } else {
+          // Different person trying to use same phone
+          return next(new AppError("errors.phone_already_registered", 400));
         }
       }
 
-      // Check if phone is used by different person
-      let phoneQuery = { phone: phone.trim() };
+      // =======================================
+      // STEP 2: If phone is free, check email
+      // =======================================
+      let existingUser = null;
       if (email) {
-        phoneQuery.email = { $ne: email.toLowerCase().trim() };
+        existingUser = await User.findOne({
+          email: email.toLowerCase().trim(),
+        });
+        if (existingUser) {
+          // Email exists but phone is different
+          // This means different person with same email - not allowed
+          return next(new AppError("errors.email_already_registered", 400));
+        }
       }
 
-      const phoneUser = await User.findOne(phoneQuery);
-      if (phoneUser) {
-        return next(new AppError("errors.phone_used_by_different_user", 409));
-      }
-
-      // Prepare user data for new registration
+      // =======================================
+      // STEP 3: Create new user - both phone and email are free
+      // =======================================
       const userData = {
         name: name.trim(),
         phone: phone.trim(),
@@ -179,7 +197,6 @@ class AuthController {
         newRole: role,
       });
 
-      const userIdentifier = existingUser.email || existingUser.phone;
       res.success(
         "auth.role_added_success",
         {

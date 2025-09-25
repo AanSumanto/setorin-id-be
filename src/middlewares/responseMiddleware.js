@@ -217,7 +217,18 @@ export const multilingualErrorHandler = (err, req, res, next) => {
   ) {
     statusCode = 400;
     messageKey = "errors.phone_already_registered";
-  } else if (err.message && err.message.includes("Invalid email or password")) {
+    
+  } 
+  else if (
+    err.message &&
+    err.message.includes("Phone number already registered different user")
+  ) {
+    statusCode = 400;
+    messageKey = "errors.phone_used_by_different_user";
+    
+  }
+  
+  else if (err.message && err.message.includes("Invalid email or password")) {
     statusCode = 401;
     messageKey = "errors.invalid_credentials";
   } else if (err.message && err.message.includes("Account locked")) {

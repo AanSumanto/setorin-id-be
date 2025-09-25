@@ -161,8 +161,12 @@ export const errorHandler = (err, req, res, next) => {
       error = new AppError("errors.email_already_registered", 400);
     } else if (err.message.includes("Phone number already registered")) {
       error = new AppError("errors.phone_already_registered", 400);
-    } else if (err.message.includes("Invalid email or password")) {
-      error = new AppError("errors.invalid_credentials", 401);
+    } 
+    else if (err.message.includes("Phone number already registered")) {
+      error = new AppError("errors.phone_already_registered", 400);
+    }
+    else if (err.message.includes("Phone number already registered different user")) {
+      error = new AppError("errors.phone_used_by_different_user", 400);
     } else if (
       err.message.includes("Account locked") ||
       err.message.includes("Account temporarily locked")
