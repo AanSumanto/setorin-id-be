@@ -122,8 +122,8 @@ class InternationalizationManager {
 
         // Authentication Errors
         invalid_credentials: {
-          id: "Email atau password salah",
-          en: "Invalid email or password",
+          id: "Login atau password salah",
+          en: "Invalid login or password",
         },
         account_locked: {
           id: "Akun dikunci sementara karena terlalu banyak percobaan login yang gagal",

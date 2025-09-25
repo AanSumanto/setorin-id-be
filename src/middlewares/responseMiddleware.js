@@ -225,13 +225,10 @@ export const multilingualErrorHandler = (err, req, res, next) => {
   ) {
     statusCode = 400;
     messageKey = "errors.phone_used_by_different_user";
-    
-  }
-  
-  else if (err.message && err.message.includes("Invalid email or password")) {
+  } else if (err.message && err.message.includes("Invalid login or password")) {
     statusCode = 401;
     messageKey = "errors.invalid_credentials";
-  } else if (err.message && err.message.includes("Account locked")) {
+  } else if (err.message && err.message.includes("Account temporarily locked due to too many failed login attempts")) {
     statusCode = 423;
     messageKey = "errors.account_locked";
   } else if (

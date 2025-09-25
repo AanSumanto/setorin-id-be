@@ -2,6 +2,7 @@ import { User, ServiceCoverage, LocationUtils } from "../models/index.js";
 import { createLogger } from "../utils/logger.js";
 import { AppError } from "../middlewares/errorMiddleware.js";
 import passwordManager from "../utils/password.js";
+import pointService from "./pointService.js"; // NEW INTEGRATION
 
 const logger = createLogger("UserService");
 
@@ -14,12 +15,6 @@ class UserService {
       // Handle population
       if (populateOptions.addresses) {
         query = query.select("+addresses");
-      }
-      if (populateOptions.rtRwData) {
-        query = query.select("+rtRwData");
-      }
-      if (populateOptions.collectorData) {
-        query = query.select("+collectorData");
       }
 
       const user = await query.exec();
@@ -35,11 +30,11 @@ class UserService {
     }
   }
 
-  // Get user profile (detailed info for profile page)
-  async getUserProfile(userId) {
+  // UPDATED: Get user profile (detailed info with multi-role and points)
+  async getUserProfile(userId, role = null) {
     try {
       const user = await User.findById(userId)
-        .select("+addresses +preferences +rtRwData +collectorData")
+        .select("+addresses +preferences")
         .exec();
 
       if (!user) {
@@ -53,6 +48,36 @@ class UserService {
       profile.memberSince = user.createdAt;
       profile.lastActiveAt = user.lastLogin || user.updatedAt;
 
+      // NEW: Add points summary for current or specified role
+      const targetRole = role || user.currentRole;
+      if (user.hasRole(targetRole)) {
+        profile.pointsSummary = await pointService.getPointsSummary(
+          userId,
+          targetRole
+        );
+      }
+
+      // NEW: Add role-specific data
+      profile.availableRoles = user.roles.map((r) => ({
+        role: r.role,
+        isActive: r.isActive,
+        isPrimary: r.isPrimary,
+        points: r.points,
+        rating: r.rating,
+      }));
+
+      // NEW: Add current role data with specific info
+      const currentRoleData = user.currentRoleData;
+      if (currentRoleData) {
+        profile.currentRoleData = {
+          role: currentRoleData.role,
+          points: currentRoleData.points,
+          rating: currentRoleData.rating,
+          rtRwData: currentRoleData.rtRwData,
+          collectorData: currentRoleData.collectorData,
+        };
+      }
+
       return profile;
     } catch (error) {
       logger.error("Error getting user profile:", error);
@@ -60,7 +85,7 @@ class UserService {
     }
   }
 
-  // Update user profile
+  // UPDATED: Update user profile with multi-role support
   async updateUserProfile(userId, updateData, currentUser) {
     try {
       const user = await User.findById(userId);
@@ -72,7 +97,7 @@ class UserService {
       // Check if user can update this profile
       if (
         currentUser._id.toString() !== userId &&
-        currentUser.role !== "admin"
+        !currentUser.hasRole("admin")
       ) {
         throw new AppError("errors.insufficient_permissions", 403);
       }
@@ -94,58 +119,38 @@ class UserService {
 
       // Validate phone uniqueness if phone is being updated
       if (updateData.phone && updateData.phone !== user.phone) {
+        // For multi-role system, phone doesn't need to be unique anymore
+        // But we can still warn if it's already used
         const existingUser = await User.findOne({
           phone: updateData.phone,
           _id: { $ne: userId },
         });
 
         if (existingUser) {
-          throw new AppError("errors.phone_already_registered", 400);
+          logger.warn(
+            `Phone ${updateData.phone} is already used by another user`
+          );
         }
 
         // Reset phone verification if phone changed
         updateData.isPhoneVerified = false;
       }
 
-      // Handle addresses update
+      // Handle addresses update with validation
       if (updateData.addresses) {
-        // Validate coordinates
-        for (const address of updateData.addresses) {
-          if (address.coordinates && address.coordinates.coordinates) {
-            const [lng, lat] = address.coordinates.coordinates;
-            if (!LocationUtils.isValidIndonesianCoordinates(lng, lat)) {
-              throw new AppError("errors.invalid_coordinates", 400);
-            }
-          }
-        }
-
-        // Ensure only one default address
-        let hasDefault = false;
-        updateData.addresses.forEach((addr, index) => {
-          if (addr.isDefault && !hasDefault) {
-            hasDefault = true;
-          } else if (addr.isDefault) {
-            updateData.addresses[index].isDefault = false;
-          }
-        });
-
-        // Set first address as default if none specified
-        if (!hasDefault && updateData.addresses.length > 0) {
-          updateData.addresses[0].isDefault = true;
-        }
+        updateData.addresses = await this.validateAndProcessAddresses(
+          updateData.addresses
+        );
       }
 
       // Handle role-specific data updates
-      if (updateData.rtRwData && !["rt", "rw"].includes(user.role)) {
-        throw new AppError("errors.invalid_role_data", 400, {
-          role: user.role,
-        });
-      }
-
-      if (updateData.collectorData && user.role !== "collector") {
-        throw new AppError("errors.invalid_role_data", 400, {
-          role: user.role,
-        });
+      if (updateData.roleData) {
+        await this.updateRoleSpecificData(
+          user,
+          updateData.roleData,
+          currentUser
+        );
+        delete updateData.roleData; // Remove from general update
       }
 
       // Update user
@@ -159,11 +164,14 @@ class UserService {
           new: true,
           runValidators: true,
         }
-      ).select("+addresses +preferences +rtRwData +collectorData");
+      ).select("+addresses +preferences");
 
       // Update service coverage if collector data changed
-      if (updateData.collectorData && user.role === "collector") {
-        await this.updateServiceCoverage(userId, updateData.collectorData);
+      if (updateData.roleData?.collectorData && user.hasRole("collector")) {
+        await this.updateServiceCoverage(
+          userId,
+          updateData.roleData.collectorData
+        );
       }
 
       logger.info(`User profile updated: ${userId}`);
@@ -175,7 +183,151 @@ class UserService {
     }
   }
 
-  // Search users with filters and pagination
+  // NEW: Switch user role
+  async switchUserRole(userId, targetRole, currentUser) {
+    try {
+      // Check permissions
+      if (
+        currentUser._id.toString() !== userId &&
+        !currentUser.hasRole("admin")
+      ) {
+        throw new AppError("errors.insufficient_permissions", 403);
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new AppError("errors.user_not_found", 404);
+      }
+
+      // Switch role
+      await user.switchRole(targetRole);
+
+      logger.info(`User ${userId} switched to role: ${targetRole}`);
+
+      return {
+        message: "Role switched successfully",
+        newRole: targetRole,
+        userData: this.sanitizeUser(user),
+      };
+    } catch (error) {
+      logger.error("Error switching user role:", error);
+      throw error;
+    }
+  }
+
+  // NEW: Add new role to user
+  async addUserRole(userId, roleData, currentUser) {
+    try {
+      // Only admin can add roles
+      if (!currentUser.hasRole("admin")) {
+        throw new AppError("errors.insufficient_permissions", 403);
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new AppError("errors.user_not_found", 404);
+      }
+
+      // Validate role data
+      const validatedRoleData = await this.validateRoleData(roleData);
+
+      // Add role
+      await user.addRole(validatedRoleData);
+
+      logger.info(`Role ${roleData.role} added to user: ${userId}`);
+
+      return {
+        message: "Role added successfully",
+        newRole: roleData.role,
+        userData: this.sanitizeUser(user),
+      };
+    } catch (error) {
+      logger.error("Error adding user role:", error);
+      throw error;
+    }
+  }
+
+  // NEW: Remove role from user
+  async removeUserRole(userId, roleName, currentUser) {
+    try {
+      // Only admin can remove roles
+      if (!currentUser.hasRole("admin")) {
+        throw new AppError("errors.insufficient_permissions", 403);
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new AppError("errors.user_not_found", 404);
+      }
+
+      // Remove role
+      await user.removeRole(roleName);
+
+      logger.info(`Role ${roleName} removed from user: ${userId}`);
+
+      return {
+        message: "Role removed successfully",
+        removedRole: roleName,
+        userData: this.sanitizeUser(user),
+      };
+    } catch (error) {
+      logger.error("Error removing user role:", error);
+      throw error;
+    }
+  }
+
+  // NEW: Get user points summary
+  async getUserPointsSummary(userId, role = null, currentUser) {
+    try {
+      // Check permissions
+      if (
+        currentUser._id.toString() !== userId &&
+        !currentUser.hasRole("admin")
+      ) {
+        throw new AppError("errors.insufficient_permissions", 403);
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new AppError("errors.user_not_found", 404);
+      }
+
+      const targetRole = role || user.currentRole;
+
+      // Get comprehensive points summary
+      const pointsSummary = await pointService.getPointsSummary(
+        userId,
+        targetRole
+      );
+
+      // Get points history
+      const pointsHistory = await pointService.getPointsHistory(
+        userId,
+        {
+          role: targetRole,
+        },
+        {
+          page: 1,
+          limit: 10,
+        }
+      );
+
+      return {
+        role: targetRole,
+        summary: pointsSummary,
+        recentHistory: pointsHistory.transactions,
+        availableRoles: user.roles.map((r) => ({
+          role: r.role,
+          points: r.points,
+        })),
+      };
+    } catch (error) {
+      logger.error("Error getting user points summary:", error);
+      throw error;
+    }
+  }
+
+  // UPDATED: Search users with multi-role support
   async searchUsers(filters = {}, pagination = {}, currentUser) {
     try {
       const {
@@ -197,7 +349,7 @@ class UserService {
         order = "desc",
       } = pagination;
 
-      // Build query
+      // Build query for multi-role system
       let query = {};
 
       // Text search across name and email
@@ -208,9 +360,10 @@ class UserService {
         ];
       }
 
-      // Filter by role
+      // Filter by role (now searches in roles array)
       if (role) {
-        query.role = role;
+        query["roles.role"] = role;
+        query["roles.isActive"] = true;
       }
 
       // Filter by active status
@@ -231,9 +384,9 @@ class UserService {
         query["addresses.province"] = { $regex: province, $options: "i" };
       }
 
-      // Filter by rating
-      if (rating) {
-        query["rating.average"] = { $gte: parseFloat(rating) };
+      // Filter by rating (for specific role)
+      if (rating && role) {
+        query["roles.rating.average"] = { $gte: parseFloat(rating) };
       }
 
       // Geospatial search
@@ -251,13 +404,18 @@ class UserService {
       }
 
       // Admin can see all users, others see only active users
-      if (currentUser.role !== "admin") {
+      if (!currentUser.hasRole("admin")) {
         query.isActive = true;
       }
 
       // Build sort object
       const sortObj = {};
-      sortObj[sort] = order === "desc" ? -1 : 1;
+      if (sort === "rating" && role) {
+        // Sort by role-specific rating
+        sortObj["roles.rating.average"] = order === "desc" ? -1 : 1;
+      } else {
+        sortObj[sort] = order === "desc" ? -1 : 1;
+      }
 
       // Execute query with pagination
       const totalItems = await User.countDocuments(query);
@@ -290,18 +448,20 @@ class UserService {
     }
   }
 
-  // Get users by role with specific filters
+  // UPDATED: Get users by role with multi-role support
   async getUsersByRole(role, filters = {}, pagination = {}) {
     try {
       const roleFilters = { ...filters, role };
-      return await this.searchUsers(roleFilters, pagination, { role: "admin" });
+      return await this.searchUsers(roleFilters, pagination, {
+        hasRole: () => true,
+      }); // Mock admin user
     } catch (error) {
       logger.error(`Error getting users by role ${role}:`, error);
       throw error;
     }
   }
 
-  // Find nearby users (collectors, RT, RW)
+  // UPDATED: Find nearby users with role filtering
   async findNearbyUsers(coordinates, role = null, radius = 10) {
     try {
       const [lng, lat] = coordinates;
@@ -324,23 +484,37 @@ class UserService {
       };
 
       if (role) {
-        query.role = role;
+        query["roles.role"] = role;
+        query["roles.isActive"] = true;
       }
 
       const users = await User.find(query)
-        .select("name avatar rating addresses role collectorData rtRwData")
+        .select("name avatar addresses roles currentRole")
         .limit(20)
         .exec();
 
       return users.map((user) => {
         const sanitized = this.sanitizeUser(user);
 
-        // Add distance calculation (approximation)
+        // Add distance calculation
         const userCoords = user.addresses.find((addr) => addr.isDefault)
           ?.coordinates?.coordinates;
         if (userCoords) {
           const distance = this.calculateDistance([lng, lat], userCoords);
-          sanitized.distance = Math.round(distance * 100) / 100; // Round to 2 decimal places
+          sanitized.distance = Math.round(distance * 100) / 100;
+        }
+
+        // Add role-specific data
+        if (role) {
+          const roleData = user.getRoleData(role);
+          if (roleData) {
+            sanitized.roleSpecific = {
+              rating: roleData.rating,
+              points: roleData.points,
+              rtRwData: roleData.rtRwData,
+              collectorData: roleData.collectorData,
+            };
+          }
         }
 
         return sanitized;
@@ -362,7 +536,7 @@ class UserService {
 
       // Only admin or user themselves can deactivate
       if (
-        currentUser.role !== "admin" &&
+        !currentUser.hasRole("admin") &&
         currentUser._id.toString() !== userId
       ) {
         throw new AppError("errors.insufficient_permissions", 403);
@@ -372,9 +546,6 @@ class UserService {
       user.deactivatedAt = new Date();
       user.deactivationReason = reason;
       await user.save();
-
-      // Remove all user sessions
-      // This will be handled by auth service if integrated
 
       logger.info(`User deactivated: ${userId} by ${currentUser._id}`);
 
@@ -389,7 +560,7 @@ class UserService {
   async reactivateUser(userId, currentUser) {
     try {
       // Only admin can reactivate
-      if (currentUser.role !== "admin") {
+      if (!currentUser.hasRole("admin")) {
         throw new AppError("errors.insufficient_permissions", 403);
       }
 
@@ -413,28 +584,46 @@ class UserService {
     }
   }
 
-  // Get user statistics
-  async getUserStatistics(userId) {
+  // UPDATED: Get user statistics with points and multi-role data
+  async getUserStatistics(userId, currentUser) {
     try {
+      // Check permissions
+      if (
+        currentUser._id.toString() !== userId &&
+        !currentUser.hasRole("admin")
+      ) {
+        throw new AppError("errors.insufficient_permissions", 403);
+      }
+
+      console.log("Fetching statistics for user:", userId);
       const user = await User.findById(userId);
 
       if (!user) {
         throw new AppError("errors.user_not_found", 404);
       }
 
-      // This will be enhanced when order/rating services are implemented
+      // Get points summary for current role
+      const pointsSummary = await pointService.getPointsSummary(
+        userId,
+        user.currentRole
+      );
+
       const stats = {
         basicInfo: {
           memberSince: user.createdAt,
           lastActive: user.lastLogin || user.updatedAt,
           profileCompleteness: this.calculateProfileCompleteness(user),
-          totalPoints: user.points.current,
-          lifetimePoints: user.points.lifetime,
+          currentRole: user.currentRole,
+          totalRoles: user.roles.length,
         },
-        rating: {
-          average: user.rating.average,
-          count: user.rating.count,
-        },
+        roles: user.roles.map((role) => ({
+          role: role.role,
+          isActive: role.isActive,
+          isPrimary: role.isPrimary,
+          points: role.points,
+          rating: role.rating,
+        })),
+        pointsSummary,
         verification: {
           emailVerified: user.isEmailVerified,
           phoneVerified: user.isPhoneVerified,
@@ -448,20 +637,118 @@ class UserService {
     }
   }
 
+  // NEW: Validate and process addresses
+  async validateAndProcessAddresses(addresses) {
+    const processedAddresses = [];
+
+    for (const address of addresses) {
+      if (address.coordinates && address.coordinates.coordinates) {
+        const [lng, lat] = address.coordinates.coordinates;
+        if (!LocationUtils.isValidIndonesianCoordinates(lng, lat)) {
+          throw new AppError("errors.invalid_coordinates", 400);
+        }
+      }
+      processedAddresses.push(address);
+    }
+
+    // Ensure only one default address
+    let hasDefault = false;
+    processedAddresses.forEach((addr, index) => {
+      if (addr.isDefault && !hasDefault) {
+        hasDefault = true;
+      } else if (addr.isDefault) {
+        processedAddresses[index].isDefault = false;
+      }
+    });
+
+    // Set first address as default if none specified
+    if (!hasDefault && processedAddresses.length > 0) {
+      processedAddresses[0].isDefault = true;
+    }
+
+    return processedAddresses;
+  }
+
+  // NEW: Update role-specific data
+  async updateRoleSpecificData(user, roleData, currentUser) {
+    const { role, data } = roleData;
+
+    // Validate user has the role
+    if (!user.hasRole(role)) {
+      throw new AppError("errors.role_not_found", 400, { role });
+    }
+
+    // Update role-specific data
+    const roleIndex = user.roles.findIndex((r) => r.role === role);
+    if (roleIndex !== -1) {
+      if (role === "rt" || role === "rw") {
+        user.roles[roleIndex].rtRwData = {
+          ...user.roles[roleIndex].rtRwData,
+          ...data,
+        };
+      } else if (role === "collector") {
+        user.roles[roleIndex].collectorData = {
+          ...user.roles[roleIndex].collectorData,
+          ...data,
+        };
+      }
+    }
+
+    await user.save();
+  }
+
+  // NEW: Validate role data
+  async validateRoleData(roleData) {
+    const { role, rtRwData, collectorData } = roleData;
+
+    // Validate role-specific required data
+    if ((role === "rt" || role === "rw") && !rtRwData) {
+      throw new AppError("errors.missing_role_data", 400, {
+        role,
+        required: "rtRwData",
+      });
+    }
+
+    if (role === "collector" && !collectorData) {
+      throw new AppError("errors.missing_role_data", 400, {
+        role,
+        required: "collectorData",
+      });
+    }
+
+    return {
+      role,
+      isActive: true,
+      isPrimary: roleData.isPrimary || false,
+      rtRwData,
+      collectorData,
+      points: {
+        current: 0,
+        lifetime: 0,
+      },
+      rating: {
+        average: 0,
+        count: 0,
+      },
+    };
+  }
+
   // Helper method to calculate profile completeness
   calculateProfileCompleteness(user) {
-    const fields = ["name", "email", "phone", "addresses"];
+    const basicFields = ["name", "email", "phone", "addresses"];
+    let requiredFields = [...basicFields];
 
-    const roleSpecificFields = {
-      rt: ["rtRwData"],
-      rw: ["rtRwData"],
-      collector: ["collectorData"],
-    };
+    // Add role-specific requirements
+    user.roles.forEach((role) => {
+      if (role.role === "rt" || role.role === "rw") {
+        requiredFields.push("rtRwData");
+      } else if (role.role === "collector") {
+        requiredFields.push("collectorData");
+      }
+    });
 
-    const requiredFields = [
-      ...fields,
-      ...(roleSpecificFields[user.role] || []),
-    ];
+    // Remove duplicates
+    requiredFields = [...new Set(requiredFields)];
 
     let completedFields = 0;
 
@@ -470,6 +757,16 @@ class UserService {
         if (user.addresses && user.addresses.length > 0) {
           completedFields++;
         }
+      } else if (field === "rtRwData") {
+        const hasRtRwRole = user.roles.some(
+          (r) => (r.role === "rt" || r.role === "rw") && r.rtRwData
+        );
+        if (hasRtRwRole) completedFields++;
+      } else if (field === "collectorData") {
+        const hasCollectorRole = user.roles.some(
+          (r) => r.role === "collector" && r.collectorData
+        );
+        if (hasCollectorRole) completedFields++;
       } else if (user[field]) {
         completedFields++;
       }
@@ -523,7 +820,6 @@ class UserService {
       logger.info(`Service coverage updated for collector: ${userId}`);
     } catch (error) {
       logger.error("Error updating service coverage:", error);
-      // Don't throw error as this is a secondary operation
     }
   }
 

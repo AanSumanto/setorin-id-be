@@ -21,7 +21,7 @@ import {
 
 // Import routes
 import authRoutes from "./routes/authRoutes.js";
-// import userRoutes from './src/routes/userRoutes.js';
+import userRoutes from "./routes/userRoutes.js";
 // import productRoutes from './src/routes/productRoutes.js';
 // import orderRoutes from './src/routes/orderRoutes.js';
 // import ratingRoutes from './src/routes/ratingRoutes.js';
@@ -148,7 +148,7 @@ class App {
 
     // API Routes
     this.app.use("/api/auth", authRoutes);
-    // this.app.use('/api/users', userRoutes);
+    this.app.use("/api/users", userRoutes);
     // this.app.use('/api/products', productRoutes);
     // this.app.use('/api/orders', orderRoutes);
     // this.app.use('/api/ratings', ratingRoutes);
