@@ -744,6 +744,16 @@ class AuthController {
     try {
       const { token, newPassword, confirmPassword } = req.body;
 
+      // Get IP address
+      const ipAddress =
+        req.ip ||
+        req.connection.remoteAddress ||
+        req.socket.remoteAddress ||
+        (req.connection.socket ? req.connection.socket.remoteAddress : null);
+
+      // Get User Agent
+      const userAgent = req.get("User-Agent") || "Unknown";
+
       if (!token || !newPassword || !confirmPassword) {
         return next(
           new AppError("errors.required_field", 400, {
@@ -756,7 +766,10 @@ class AuthController {
         return next(new AppError("errors.passwords_not_match", 400));
       }
 
-      const result = await authService.resetPassword(token, newPassword);
+      const result = await authService.resetPassword(token, newPassword, {
+        ipAddress,
+        userAgent,
+      });
 
       res.success("auth.password_reset", result);
     } catch (error) {

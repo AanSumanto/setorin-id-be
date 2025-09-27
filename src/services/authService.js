@@ -4,6 +4,7 @@ import passwordManager from "../utils/password.js";
 import { createLogger } from "../utils/logger.js";
 import { AppError } from "../middlewares/errorMiddleware.js";
 import redisConnection from "../config/redis.js";
+import notificationService from "./notificationService.js";
 
 const logger = createLogger("AuthService");
 
@@ -607,6 +608,11 @@ class AuthService {
         user.passwordResetExpires = resetTokenData.expires;
         await user.save();
 
+        //Send email notification
+        await notificationService.sendPasswordResetNotification(user, "email", {
+          resetToken: resetTokenData.token,
+        });
+
         logger.info(`Password reset requested for user: ${user.email}`);
         return {
           message: "If the email exists, a reset link has been sent",
@@ -626,6 +632,11 @@ class AuthService {
           }),
           300 // 5 minutes
         );
+
+        // Send SMS notification
+        await notificationService.sendPasswordResetNotification(user, "otp", {
+          otp: otpData.otp,
+        });
 
         logger.info(`Password reset OTP sent for user: ${user.phone}`);
         return {
@@ -680,6 +691,11 @@ class AuthService {
       await redisConnection.del(otpKey);
       await jwtManager.removeAllRefreshTokens(user._id);
 
+      // Send success notification
+      await notificationService.sendPasswordResetNotification(user, "success", {
+        ipAddress: "N/A", // Anda bisa pass dari controller
+        userAgent: "N/A", // Anda bisa pass dari controller
+      });
       logger.info(`Password reset completed via OTP for user: ${user.phone}`);
       return { message: "Password reset successfully" };
     } catch (error) {
@@ -734,6 +750,12 @@ class AuthService {
 
       // Invalidate all existing refresh tokens
       await jwtManager.removeAllRefreshTokens(user._id);
+
+      // Send success notification
+      await notificationService.sendPasswordResetNotification(user, "success", {
+        ipAddress: requestInfo.ipAddress || "Unknown",
+        userAgent: requestInfo.userAgent || "Unknown",
+      });
 
       const userIdentifier = user.email || user.phone;
       logger.info(`Password reset completed for user: ${userIdentifier}`);
